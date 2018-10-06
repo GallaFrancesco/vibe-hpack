@@ -177,13 +177,6 @@ private struct DynamicTable {
 
 	@property ref auto table() @safe { return m_table; }
 
-	/** new size should be lower than the max set one
-	  * after size is successfully changed, an ACK has to be sent
-	  * multiple changes between two header fields are possible
-	  * if multiple changes occour, only the smallest maximum size
-	  * requested has to be acknowledged
-	*/
-
 	HTTP2HeaderTableField opIndex(size_t idx) @safe
 	{
 		foreach(i,f; m_table[].enumerate(1)) {
@@ -217,11 +210,17 @@ private struct DynamicTable {
 		m_index--;
 	}
 
-	// called by an update in the SETTINGS struct
+	/** new size should be lower than the max set one
+	  * after size is successfully changed, an ACK has to be sent
+	  * multiple changes between two header fields are possible
+	  * if multiple changes occour, only the smallest maximum size
+	  * requested has to be acknowledged
+	*/
 	void updateMaxSize(size_t nsize) @safe
 	{
 		assert(false);
 	}
+
 	// compute size of an entry as per RFC
 	private size_t computeESize(HTTP2HeaderTableField f) @safe
 	{
@@ -284,24 +283,31 @@ struct IndexingTable {
 		else return m_dynamic[idx-STATIC_TABLE_SIZE];
 	}
 
-	// assignment can only be done on the dynamic table
+	// forward to insert
 	auto opOpAssign(string op)(HTTP2HeaderTableField hf) @safe
 		if(op == "+")
 	{
-		m_dynamic.insert(hf);
+		insert(hf);
 	}
 
 	// dollar == size
+	// +1 to mantain consistency with the dollar operator
 	size_t opDollar() @safe
 	{
-		return size();
+		return size() + 1;
+	}
+
+	// assignment can only be done on the dynamic table
+	void insert(HTTP2HeaderTableField hf) @safe
+	{
+		m_dynamic.insert(hf);
 	}
 }
 
 unittest {
 	// indexing table
 	HTTP2Settings settings;
-	IndexingTable table = settings.headerTableSize;
+	IndexingTable table = IndexingTable(settings.headerTableSize);
 	assert(table[2].name == ":method" && table[2].value == HTTPMethod.GET);
 
 	// assignment
@@ -310,9 +316,25 @@ unittest {
 	assert(table.size == STATIC_TABLE_SIZE + 1);
 	assert(table[STATIC_TABLE_SIZE+1].name == "test");
 
-	// dollar
 	auto h2 = HTTP2HeaderTableField("test2", "testval2");
-	table += h2;
+	table.insert(h2);
 	assert(table.size == STATIC_TABLE_SIZE + 2);
-	assert(table[$ - 1].name == "test2");
+	assert(table[STATIC_TABLE_SIZE+1].name == "test2");
+
+	// dollar
+	auto h3 = HTTP2HeaderTableField("test3", "testval3");
+	table += h3;
+	assert(table.size == STATIC_TABLE_SIZE + 3);
+	assert(table[$-1].name == "test");
+	assert(table[$ - 2].name == "test2");
+	assert(table[STATIC_TABLE_SIZE+1].name == "test3");
+
+	// test removal on full table
+	HTTP2SettingValue hts = h.name.sizeof + h.value.sizeof + 32; // only one header
+	IndexingTable t2 = IndexingTable(hts);
+	t2 += h;
+	t2 += h;
+	assert(t2.size == STATIC_TABLE_SIZE + 1);
+	assert(t2[STATIC_TABLE_SIZE + 1].name == "test");
+	assert(t2[$ - 1].name == "test");
 }

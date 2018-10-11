@@ -1,6 +1,8 @@
 module HPACK.decoder;
 // import HPACK.tables;
 import HPACK.exception;
+import HPACK.huffman;
+
 import std.range; // Decoder
 import std.bitmanip; // prefix encoding / decoding
 
@@ -48,36 +50,83 @@ struct HeaderDecoder(Range) if (isInputRange!Range &&
 		{
 			while(!empty) {
 
-				auto bbuf = m_range.drop(1).toBitArray();
+				auto bbuf = m_range.take(1).toBitArray();
+				m_range.popFront();
+
 				switch(bbuf[0]) {
 					case 1: // indexed (integer)
 						uint nbits = 7;
-						auto res = bbuf.toInteger();
+						auto res = bbuf.toInteger(1);
 
-						if (res < (1 << nbits) - 1) break;
-						else {
+						if (res < (1 << nbits) - 1) {
+							//m_decoded ~= table[res]; // TODO
+							break;
+						} else {
+
 							uint m = 0;
 							do {
 								// take another octet
-								bbuf = m_range.drop(1).toBitArray();
+								bbuf = m_range.take(1).toBitArray();
+								m_range.popFront();
 								// concatenate it to the result
-								res = res + b.toInteger()*(1 << m);
+								res = res + bbuf.toInteger(1)*(1 << m);
 								m += 7;
 							} while(bbuf[0] == 1);
-							//m_decoded ~= table[res]; TODO
-							assert(false);
+
+							m_decoded ~= table[res]; // TODO
+							assert(false, "missing table idx");
 						}
-
+						break;
 					case 0: // literal
+						if (bbuf[1]) { // inserted in dynamic table
+							auto idx = bbuf.toInteger(2);
 
-					default: assert(false);
+							if(idx != 0) {  // name == table[index].name, value == literal
+								string val = decodeLiteral();
+								m_decoded ~= HTTP2HeaderTableField(table[index].name, val);
+
+							} else { // name == literal, value == literal
+								string name = decodeLiteral();
+								string value = decodeLiteral();
+								m_decoded ~= HTTP2HeaderTableField(name, value);
+
+							}
+						} else { // not inserted in dynamic table
+
+						}
+						break;
+					default:
+						assert(false, "Unable to convert to BitArray");
 				}
 			}
 
 		}
 
+		string decodeLiteral() @safe
+		{
+			Range buf = m_range.take(1).toBitArray();
+			m_range.popFront();
+			string res;
+			bool huffman = bbuf[0] ? true : false;
+
+			auto vlen = bbuf.toInteger(1); // value length
+			enforce!HPACKDecoderException(!empty && m_range.length > vlen,
+					"Cannot decode raw octets from empty range");
+
+			// take a buffer of remaining octets
+			Range block = m_range.take(vlen);
+			m_range.popFrontN(vlen);
+
+			if(huff) { // huffman encoded
+				res = decodeHuffman(buf);
+			} else { // raw encoded
+				res = cast(string)buf;
+			}
+			return res;
+		}
+
 		// decode byte (BitArray[8]) as integer representation
-		size_t toInteger(BitArray bbuf) @safe
+		size_t toInteger(BitArray bbuf, uint prefix) @safe
 		{
 			bbuf[0] = 0; // set the prefix bit to 0
 			size_t res = 0;

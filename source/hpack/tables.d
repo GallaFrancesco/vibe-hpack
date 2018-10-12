@@ -5,9 +5,9 @@ import vibe.http.status;
 import vibe.http.common;
 import vibe.http.internal.http2;
 import vibe.core.log;
+import vibe.internal.array : FixedRingBuffer;
 
 import std.variant;
-import std.container.dlist;
 import std.traits;
 import std.meta;
 import std.range;
@@ -82,78 +82,85 @@ immutable size_t STATIC_TABLE_SIZE = 61;
   * fixed size, fixed order of entries (read only)
   * cannot be updated while decoding a header block
   */
-static immutable HTTP2HeaderTableField[size_t] StaticTable;
+static immutable HTTP2HeaderTableField[STATIC_TABLE_SIZE+1] StaticTable;
 
-shared static this() {
+static this() {
 	StaticTable = [
-		1:	   HTTP2HeaderTableField(":authority", ""),
-		2:	   HTTP2HeaderTableField(":method", HTTPMethod.GET),
-		3:	   HTTP2HeaderTableField(":method", HTTPMethod.POST),
-		4:	   HTTP2HeaderTableField(":path", "/"),
-		5:	   HTTP2HeaderTableField(":path", "/index.html"),
-		6:	   HTTP2HeaderTableField(":scheme", "http"),
-		7:	   HTTP2HeaderTableField(":scheme", "https"),
-		8:	   HTTP2HeaderTableField(":status", HTTPStatus.ok), 					// 200
-		9:	   HTTP2HeaderTableField(":status", HTTPStatus.noContent), 				// 204
-		10:	   HTTP2HeaderTableField(":status", HTTPStatus.partialContent), 		// 206
-		11:	   HTTP2HeaderTableField(":status", HTTPStatus.notModified), 			// 304
-		12:	   HTTP2HeaderTableField(":status", HTTPStatus.badRequest), 			// 400
-		13:	   HTTP2HeaderTableField(":status", HTTPStatus.notFound), 				// 404
-		14:	   HTTP2HeaderTableField(":status", HTTPStatus.internalServerError), 	// 500
-		15:	   HTTP2HeaderTableField("accept-charset", ""),
-		16:	   HTTP2HeaderTableField("accept-encoding", ["gzip", "deflate"]),
-		17:	   HTTP2HeaderTableField("accept-language", ""),
-		18:	   HTTP2HeaderTableField("accept-ranges", ""),
-		19:	   HTTP2HeaderTableField("accept", ""),
-		20:	   HTTP2HeaderTableField("access-control-allow-origin", ""),
-		21:	   HTTP2HeaderTableField("age", ""),
-		22:	   HTTP2HeaderTableField("allow", ""),
-		23:	   HTTP2HeaderTableField("authorization", ""),
-		24:	   HTTP2HeaderTableField("cache-control", ""),
-		25:	   HTTP2HeaderTableField("content-disposition", ""),
-		26:	   HTTP2HeaderTableField("content-encoding", ""),
-		27:	   HTTP2HeaderTableField("content-language", ""),
-		28:	   HTTP2HeaderTableField("content-length", ""),
-		29:	   HTTP2HeaderTableField("content-location", ""),
-		30:	   HTTP2HeaderTableField("content-range", ""),
-		31:	   HTTP2HeaderTableField("content-type", ""),
-		32:	   HTTP2HeaderTableField("cookie", ""),
-		33:	   HTTP2HeaderTableField("date", ""),
-		34:	   HTTP2HeaderTableField("etag", ""),
-		35:	   HTTP2HeaderTableField("expect", ""),
-		36:	   HTTP2HeaderTableField("expires", ""),
-		37:	   HTTP2HeaderTableField("from", ""),
-		38:	   HTTP2HeaderTableField("host", ""),
-		39:	   HTTP2HeaderTableField("if-match", ""),
-		40:	   HTTP2HeaderTableField("if-modified-since", ""),
-		41:	   HTTP2HeaderTableField("if-none-match", ""),
-		42:	   HTTP2HeaderTableField("if-range", ""),
-		43:	   HTTP2HeaderTableField("if-unmodified-since", ""),
-		44:	   HTTP2HeaderTableField("last-modified", ""),
-		45:	   HTTP2HeaderTableField("link", ""),
-		46:	   HTTP2HeaderTableField("location", ""),
-		47:	   HTTP2HeaderTableField("max-forwards", ""),
-		48:	   HTTP2HeaderTableField("proxy-authenticate", ""),
-		49:	   HTTP2HeaderTableField("proxy-authorization", ""),
-		50:	   HTTP2HeaderTableField("range", ""),
-		51:	   HTTP2HeaderTableField("referer", ""),
-		52:	   HTTP2HeaderTableField("refresh", ""),
-		53:	   HTTP2HeaderTableField("retry-after", ""),
-		54:	   HTTP2HeaderTableField("server", ""),
-		55:	   HTTP2HeaderTableField("set-cookie", ""),
-		56:	   HTTP2HeaderTableField("strict-transport-security", ""),
-		57:	   HTTP2HeaderTableField("transfer-encoding", ""),
-		58:	   HTTP2HeaderTableField("user-agent", ""),
-		59:	   HTTP2HeaderTableField("vary", ""),
-		60:	   HTTP2HeaderTableField("via", ""),
-		61:	   HTTP2HeaderTableField("www-authenticate", "")
+		HTTP2HeaderTableField("",""), // 0 index is not allowed
+		HTTP2HeaderTableField(":authority", ""),
+		HTTP2HeaderTableField(":method", HTTPMethod.GET),
+		HTTP2HeaderTableField(":method", HTTPMethod.POST),
+		HTTP2HeaderTableField(":path", "/"),
+		HTTP2HeaderTableField(":path", "/index.html"),
+		HTTP2HeaderTableField(":scheme", "http"),
+		HTTP2HeaderTableField(":scheme", "https"),
+		HTTP2HeaderTableField(":status", HTTPStatus.ok), 					// 200
+		HTTP2HeaderTableField(":status", HTTPStatus.noContent), 				// 204
+		HTTP2HeaderTableField(":status", HTTPStatus.partialContent), 		// 206
+		HTTP2HeaderTableField(":status", HTTPStatus.notModified), 			// 304
+		HTTP2HeaderTableField(":status", HTTPStatus.badRequest), 			// 400
+		HTTP2HeaderTableField(":status", HTTPStatus.notFound), 				// 404
+		HTTP2HeaderTableField(":status", HTTPStatus.internalServerError), 	// 500
+		HTTP2HeaderTableField("accept-charset", ""),
+		HTTP2HeaderTableField("accept-encoding", ["gzip", "deflate"]),
+		HTTP2HeaderTableField("accept-language", ""),
+		HTTP2HeaderTableField("accept-ranges", ""),
+		HTTP2HeaderTableField("accept", ""),
+		HTTP2HeaderTableField("access-control-allow-origin", ""),
+		HTTP2HeaderTableField("age", ""),
+		HTTP2HeaderTableField("allow", ""),
+		HTTP2HeaderTableField("authorization", ""),
+		HTTP2HeaderTableField("cache-control", ""),
+		HTTP2HeaderTableField("content-disposition", ""),
+		HTTP2HeaderTableField("content-encoding", ""),
+		HTTP2HeaderTableField("content-language", ""),
+		HTTP2HeaderTableField("content-length", ""),
+		HTTP2HeaderTableField("content-location", ""),
+		HTTP2HeaderTableField("content-range", ""),
+		HTTP2HeaderTableField("content-type", ""),
+		HTTP2HeaderTableField("cookie", ""),
+		HTTP2HeaderTableField("date", ""),
+		HTTP2HeaderTableField("etag", ""),
+		HTTP2HeaderTableField("expect", ""),
+		HTTP2HeaderTableField("expires", ""),
+		HTTP2HeaderTableField("from", ""),
+		HTTP2HeaderTableField("host", ""),
+		HTTP2HeaderTableField("if-match", ""),
+		HTTP2HeaderTableField("if-modified-since", ""),
+		HTTP2HeaderTableField("if-none-match", ""),
+		HTTP2HeaderTableField("if-range", ""),
+		HTTP2HeaderTableField("if-unmodified-since", ""),
+		HTTP2HeaderTableField("last-modified", ""),
+		HTTP2HeaderTableField("link", ""),
+		HTTP2HeaderTableField("location", ""),
+		HTTP2HeaderTableField("max-forwards", ""),
+		HTTP2HeaderTableField("proxy-authenticate", ""),
+		HTTP2HeaderTableField("proxy-authorization", ""),
+		HTTP2HeaderTableField("range", ""),
+		HTTP2HeaderTableField("referer", ""),
+		HTTP2HeaderTableField("refresh", ""),
+		HTTP2HeaderTableField("retry-after", ""),
+		HTTP2HeaderTableField("server", ""),
+		HTTP2HeaderTableField("set-cookie", ""),
+		HTTP2HeaderTableField("strict-transport-security", ""),
+		HTTP2HeaderTableField("transfer-encoding", ""),
+		HTTP2HeaderTableField("user-agent", ""),
+		HTTP2HeaderTableField("vary", ""),
+		HTTP2HeaderTableField("via", ""),
+		HTTP2HeaderTableField("www-authenticate", "")
 	];
+}
+
+private ref immutable(HTTP2HeaderTableField) getStaticTableEntry(size_t key) @safe
+{
+    assert(key > 0 && key < StaticTable.length, "Invalid static table index");
+    return StaticTable[key];
 }
 
 private struct DynamicTable {
 	private {
-		// table is a queue, initially empty
-		DList!HTTP2HeaderTableField m_table;
+		// table is a circular buffer, initially empty
+		FixedRingBuffer!HTTP2HeaderTableField m_table;
 
 		// as defined in SETTINGS_HEADER_TABLE_SIZE
 		HTTP2SettingValue m_maxsize;
@@ -165,9 +172,10 @@ private struct DynamicTable {
 		size_t m_index = 0;
 	}
 
-	this(HTTP2SettingValue ms) @safe
+	this(HTTP2SettingValue ms) @trusted
 	{
 		m_maxsize = ms;
+		m_table.capacity = ms;
 	}
 
 	// number of elements inside dynamic table
@@ -179,10 +187,11 @@ private struct DynamicTable {
 
 	HTTP2HeaderTableField opIndex(size_t idx) @safe
 	{
-		foreach(i,f; m_table[].enumerate(1)) {
-			 if(i == idx) return f;
-		}
-		assert(false, "Invalid dynamic table index");
+		//foreach(i,f; m_table[].enumerate(1)) {
+			 //if(i == idx) return f;
+		//}
+		assert(idx > 0 && idx <= m_index, "Invalid table index");
+		return m_table[idx-1];
 	}
 
 	// insert at the head
@@ -196,7 +205,7 @@ private struct DynamicTable {
 		}
 
 		// insert
-		m_table.insertFront(header);
+		m_table.put(header);
 		m_size += nsize;
 		m_index++;
 	}
@@ -206,7 +215,7 @@ private struct DynamicTable {
 	{
 		assert(!m_table.empty, "Cannot remove element from empty table");
 		m_size -= computeESize(m_table.back);
-		m_table.removeBack();
+		m_table.popFront();
 		m_index--;
 	}
 
@@ -230,10 +239,10 @@ private struct DynamicTable {
 
 unittest {
 	// static table
-	auto a = StaticTable[1];
+	auto a = getStaticTableEntry(1);
 	static assert(is(typeof(a) == immutable(HTTP2HeaderTableField)));
 	assert(a.name == ":authority");
-	assert(StaticTable[2].name == ":method" && StaticTable[2].value == HTTPMethod.GET);
+	assert(getStaticTableEntry(2).name == ":method" && getStaticTableEntry(2).value == HTTPMethod.GET);
 
 	HTTP2Settings settings;
 
@@ -262,39 +271,34 @@ unittest {
   */
 struct IndexingTable {
 	private {
-		alias StaticTable m_static;
 		DynamicTable m_dynamic;
 	}
 
 	// requires the maximum size for the dynamic table
-	this(HTTP2SettingValue ms) @safe
+	this(HTTP2SettingValue ms)
 	{
 		m_dynamic = DynamicTable(ms);
 	}
 
-	@property size_t size() @safe { return STATIC_TABLE_SIZE + m_dynamic.index; }
+	@property size_t size() @safe { return STATIC_TABLE_SIZE + m_dynamic.index + 1; }
 
 	// element retrieval
 	HTTP2HeaderTableField opIndex(size_t idx) @safe
 	{
-		assert(idx <= size(), "Invalid table index");
+		assert(idx > 0 && idx <= size(), "Invalid table index");
+		import std.stdio;
 
-		if (idx <= STATIC_TABLE_SIZE) return m_static[idx];
-		else return m_dynamic[idx-STATIC_TABLE_SIZE];
-	}
-
-	// forward to insert
-	auto opOpAssign(string op)(HTTP2HeaderTableField hf) @safe
-		if(op == "+")
-	{
-		insert(hf);
+		if (idx < STATIC_TABLE_SIZE+1) return getStaticTableEntry(idx);
+		else {
+			return m_dynamic[m_dynamic.index - (idx - STATIC_TABLE_SIZE) + 1];
+		}
 	}
 
 	// dollar == size
 	// +1 to mantain consistency with the dollar operator
 	size_t opDollar() @safe
 	{
-		return size() + 1;
+		return size();
 	}
 
 	// assignment can only be done on the dynamic table
@@ -312,29 +316,29 @@ unittest {
 
 	// assignment
 	auto h = HTTP2HeaderTableField("test", "testval");
-	table += h;
-	assert(table.size == STATIC_TABLE_SIZE + 1);
+	table.insert(h);
+	assert(table.size == STATIC_TABLE_SIZE + 2);
 	assert(table[STATIC_TABLE_SIZE+1].name == "test");
 
 	auto h2 = HTTP2HeaderTableField("test2", "testval2");
 	table.insert(h2);
-	assert(table.size == STATIC_TABLE_SIZE + 2);
+	assert(table.size == STATIC_TABLE_SIZE + 3);
 	assert(table[STATIC_TABLE_SIZE+1].name == "test2");
 
 	// dollar
 	auto h3 = HTTP2HeaderTableField("test3", "testval3");
-	table += h3;
-	assert(table.size == STATIC_TABLE_SIZE + 3);
+	table.insert(h3);
+	assert(table.size == STATIC_TABLE_SIZE + 4);
 	assert(table[$-1].name == "test");
-	assert(table[$ - 2].name == "test2");
+	assert(table[$-2].name == "test2");
 	assert(table[STATIC_TABLE_SIZE+1].name == "test3");
 
 	// test removal on full table
 	HTTP2SettingValue hts = h.name.sizeof + h.value.sizeof + 32; // only one header
 	IndexingTable t2 = IndexingTable(hts);
-	t2 += h;
-	t2 += h;
-	assert(t2.size == STATIC_TABLE_SIZE + 1);
+	t2.insert(h);
+	t2.insert(h);
+	assert(t2.size == STATIC_TABLE_SIZE + 2);
 	assert(t2[STATIC_TABLE_SIZE + 1].name == "test");
 	assert(t2[$ - 1].name == "test");
 }

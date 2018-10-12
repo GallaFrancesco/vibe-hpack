@@ -11,6 +11,8 @@ import std.variant;
 import std.traits;
 import std.meta;
 import std.range;
+import std.algorithm.iteration;
+import std.math : log10;
 import taggedalgebraic;
 
 /*
@@ -157,6 +159,21 @@ private ref immutable(HTTP2HeaderTableField) getStaticTableEntry(size_t key) @sa
     return StaticTable[key];
 }
 
+// compute size of an entry as per RFC
+HTTP2SettingValue computeEntrySize(HTTP2HeaderTableField f) @safe
+{
+	alias k = HTTP2HeaderTableField.value.Kind;
+	HTTP2SettingValue ret = cast(HTTP2SettingValue)f.name.length + 32;
+
+	final switch (f.value.kind) {
+		case k.str: ret += f.value.get!string.length; break;
+		case k.strarr: ret += f.value.get!(string[]).map!(s => s.length).sum(); break;
+		case k.status: ret += cast(size_t)log10(cast(int)f.value.get!HTTPStatus) + 1; break;
+		case k.method: ret += httpMethodString(f.value.get!HTTPMethod).length; break;
+	}
+	return ret;
+}
+
 private struct DynamicTable {
 	private {
 		// table is a circular buffer, initially empty
@@ -197,7 +214,7 @@ private struct DynamicTable {
 	// insert at the head
 	void insert(HTTP2HeaderTableField header) @safe
 	{
-		auto nsize = computeESize(header);
+		auto nsize = computeEntrySize(header);
 		// ensure that the new entry does not exceed table capacity
 		while(m_size + nsize > m_maxsize) {
 			logDebug("Maximum header table size exceeded");
@@ -214,7 +231,7 @@ private struct DynamicTable {
 	void remove() @safe
 	{
 		assert(!m_table.empty, "Cannot remove element from empty table");
-		m_size -= computeESize(m_table.back);
+		m_size -= computeEntrySize(m_table.back);
 		m_table.popFront();
 		m_index--;
 	}
@@ -230,11 +247,6 @@ private struct DynamicTable {
 		assert(false);
 	}
 
-	// compute size of an entry as per RFC
-	private size_t computeESize(HTTP2HeaderTableField f) @safe
-	{
-		return f.name.sizeof + f.value.sizeof + 32;
-	}
 }
 
 unittest {
@@ -334,7 +346,7 @@ unittest {
 	assert(table[STATIC_TABLE_SIZE+1].name == "test3");
 
 	// test removal on full table
-	HTTP2SettingValue hts = h.name.sizeof + h.value.sizeof + 32; // only one header
+	HTTP2SettingValue hts = computeEntrySize(h); // only one header
 	IndexingTable t2 = IndexingTable(hts);
 	t2.insert(h);
 	t2.insert(h);

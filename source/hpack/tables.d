@@ -1,6 +1,8 @@
 //module vibe.http.internal.hpack.tables;
 module HPACK.tables;
 
+import HPACK.exception;
+
 import vibe.http.status;
 import vibe.http.common;
 import vibe.core.log;
@@ -292,8 +294,23 @@ struct IndexingTable {
 
 	@property size_t size() @safe @nogc { return STATIC_TABLE_SIZE + m_dynamic.index + 1; }
 
+<<<<<<< HEAD
 	// element retrieval
 	HTTP2HeaderTableField opIndex(size_t idx) @safe @nogc
+=======
+	@property bool empty() @safe { return m_dynamic.size == 0; }
+
+	@property HTTP2HeaderTableField front() @safe { return this[0]; }
+
+	@property void popFront() @safe
+	{
+		assert(!empty, "Cannot call popFront on an empty dynamic table");
+		m_dynamic.remove();
+	}
+
+	// element retrieval 
+	HTTP2HeaderTableField opIndex(size_t idx) @safe
+>>>>>>> 9ece47e... encode method outline
 	{
 		assert(idx > 0 && idx <= size(), "Invalid table index");
 

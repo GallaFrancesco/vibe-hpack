@@ -10,6 +10,7 @@ import vibe.http.common;
 
 import std.range;
 import std.bitmanip; // prefix encoding / decoding
+import std.typecons;
 
 
 struct HeaderEncoder(T = HTTP2HeaderTableField[])
@@ -20,12 +21,14 @@ struct HeaderEncoder(T = HTTP2HeaderTableField[])
 		T m_range;
 		IndexingTable m_table;
 		ubyte[] m_encoded;
+		bool huffman;
 	}
 
-	this(T range, IndexingTable table) @safe
+	this(T range, IndexingTable table, bool huff = true) @safe
 	{
 		m_range = range;
 		m_table = table;
+		huffman = huff;
 
 		encode();
 	}
@@ -103,8 +106,18 @@ struct HeaderEncoder(T = HTTP2HeaderTableField[])
 				// encode name as index, value as literal
 				} else if(h.name == header.name && h.value == "") {
 					// encode name as index ( always smaller than 64 )
-					m_encoded ~= (cast(ubyte)idx ^ 64) & 127;
+					m_encoded ~= (cast(ubyte)idx + 64) & 127;
+					// encode value as literal
+					if(huffman) {
+						auto t = encodeHuffman(header.value);
+						m_encoded ~= (cast(ubyte)(t.length/8) + 128);
+						m_encoded ~= t.bstr; // TODO padding
+					} else {
+						m_encoded ~= (cast(ubyte)(header.value.length / 8) + 128);
+						m_encoded ~= (cast(ubyte[])header.value);
+					}
 					return true;
+
 				}
 				idx++;
 			}

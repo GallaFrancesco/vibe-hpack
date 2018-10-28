@@ -2,5 +2,5 @@ name "hpack"
 description "Header compression algorithm for HTTP/2"
 authors "fragal"
 
-dependency "vibe-http" version="*"
+dependency "vibe-d:http" version="*"
 dependency "taggedalgebraic" version="*"

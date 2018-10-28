@@ -1,10 +1,9 @@
 module HPACK.decoder;
-// import HPACK.tables;
+
 import HPACK.exception;
 import HPACK.huffman;
 import HPACK.tables;
-
-import vibe.http.internal.http2;
+import HPACK.util;
 
 import std.range; // Decoder
 import std.bitmanip; // prefix encoding / decoding
@@ -16,34 +15,7 @@ import std.bitmanip; // prefix encoding / decoding
   * Section 6: https://tools.ietf.org/html/rfc7541#section-6
   * Appendix C: https://tools.ietf.org/html/rfc7541#appendix-C
 */
-
-// decode byte (BitArray[8]) as integer representation
-private size_t toInteger(BitArray bbuf, uint prefix) @trusted
-{
-	assert(prefix < bbuf.length, "Prefix must be at most an octet long");
-	for(uint i=0; i<prefix; ++i) bbuf[i] = 0;
-
-	size_t res = 0;
-	foreach(b; bbuf.bitsSet) {
-		res |= 1 << (7 - b);
-	}
-	return res;
-}
-
-// convert ubyte to BitArray representation (nbits == arraylen*8)
-private BitArray toBitArray(T)(T data) @trusted
-if(is(ElementType!T : const(ubyte)) || is(ElementType!T : const(char)) || is(T : int))
-{
-	BitArray bdata;
-	static if(is(typeof(T) == int)) {
-		// int to BitArray
-		bdata = BitArray(cast(void[])[data], 8);
-	} else {
-		// char[], ubyte[], bool[] to BitArray
-		bdata = BitArray(cast(void[])data, data.length*8);
-	}
-	return bdata.reverse;
-}
+alias HTTP2SettingValue = uint;
 
 /** implements an input range to decode an header block
   * m_table is a reference to the original table
@@ -115,8 +87,7 @@ struct HeaderDecoder(T = ubyte[])
 		void decode() @trusted
 		{
 			while(!m_range.empty) {
-
-				auto bbuf = [m_range[0]].toBitArray();
+				auto bbuf = m_range[0].toBitArray();
 				m_range = m_range[1..$];
 
 
@@ -185,7 +156,7 @@ struct HeaderDecoder(T = ubyte[])
 				uint m = 0;
 				do {
 					// take another octet
-					bbuf = [m_range[0]].toBitArray();
+					bbuf = m_range[0].toBitArray();
 					m_range = m_range[1..$];
 					// concatenate it to the result
 					res = res + bbuf.toInteger(1)*(1 << m);
@@ -197,7 +168,7 @@ struct HeaderDecoder(T = ubyte[])
 
 		string decodeLiteral() @trusted
 		{
-			auto bbuf = [m_range[0]].toBitArray();
+			auto bbuf = m_range[0].toBitArray();
 			m_range = m_range[1..$];
 
 			string res;
@@ -227,8 +198,7 @@ struct HeaderDecoder(T = ubyte[])
 unittest {
 	// Following examples can be found in Appendix C of the HPACK RFC
 
-	HTTP2Settings settings;
-	IndexingTable table = IndexingTable(settings.headerTableSize);
+	IndexingTable table = IndexingTable(4096);
 	/** 1. Literal header field w. indexing (raw)
 	  * custom-key: custom-header
 	  */
@@ -266,7 +236,7 @@ unittest {
 	assert(decoder.neverIndexed.back.name == "password" && decoder.neverIndexed.back.value == "secret");
 
 
-	/** 4. Indexed header field (integer) 
+	/** 4. Indexed header field (integer)
 	  * :method: GET
 	  */
 	import vibe.http.common;

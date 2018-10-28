@@ -3,7 +3,6 @@ module HPACK.tables;
 
 import vibe.http.status;
 import vibe.http.common;
-import vibe.http.internal.http2;
 import vibe.core.log;
 import vibe.internal.array : FixedRingBuffer;
 
@@ -14,6 +13,9 @@ import std.range;
 import std.algorithm.iteration;
 import std.math : log10;
 import taggedalgebraic;
+
+
+alias HTTP2SettingValue = uint;
 
 /*
 	2.3.  Indexing Tables
@@ -252,9 +254,7 @@ unittest {
 	assert(a.name == ":authority");
 	assert(getStaticTableEntry(2).name == ":method" && getStaticTableEntry(2).value == HTTPMethod.GET);
 
-	HTTP2Settings settings;
-
-	DynamicTable dt = DynamicTable(settings.headerTableSize);
+	DynamicTable dt = DynamicTable(4096);
 	assert(dt.size == 0);
 	assert(dt.index == 0);
 
@@ -321,8 +321,7 @@ struct IndexingTable {
 
 unittest {
 	// indexing table
-	HTTP2Settings settings;
-	IndexingTable table = IndexingTable(settings.headerTableSize);
+	IndexingTable table = IndexingTable(4096);
 	assert(table[2].name == ":method" && table[2].value == HTTPMethod.GET);
 
 	// assignment

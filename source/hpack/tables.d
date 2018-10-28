@@ -297,6 +297,7 @@ struct IndexingTable {
 <<<<<<< HEAD
 	// element retrieval
 	HTTP2HeaderTableField opIndex(size_t idx) @safe @nogc
+<<<<<<< HEAD
 =======
 	@property bool empty() @safe { return m_dynamic.size == 0; }
 
@@ -311,6 +312,8 @@ struct IndexingTable {
 	// element retrieval 
 	HTTP2HeaderTableField opIndex(size_t idx) @safe
 >>>>>>> 9ece47e... encode method outline
+=======
+>>>>>>> 89e40cd... @nogc and removed std.bitmanip
 	{
 		assert(idx > 0 && idx <= size(), "Invalid table index");
 

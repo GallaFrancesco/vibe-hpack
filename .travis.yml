@@ -18,10 +18,18 @@ matrix:
   include:
     - d: dmd
 <<<<<<< HEAD
+<<<<<<< HEAD
+<<<<<<< HEAD
       env: CONFIG='select' DUB_FLAGS='--build unittest-cov
 =======
       env: CONFIG='select' DUB_FLAGS='--build unittest-cov --build-mode=singleFile'
 >>>>>>> eb8ac41... ci setup
+=======
+      env: CONFIG='select' DUB_FLAGS='--build unittest-cov --build-mode=singleFile'
+>>>>>>> 318c4c5... ci setup
+=======
+      env: CONFIG='select' DUB_FLAGS='--build unittest-cov
+>>>>>>> 8903865... fixup travisci
 
 
 before_install:

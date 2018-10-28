@@ -9,38 +9,62 @@ import std.conv : to;
   * The huffman table specifications can be found at:
   * Appendix B of RFC 7541: https://tools.ietf.org/html/rfc7541#appendix-B
 */
-string decodeHuffman(Range)(Range buf) @safe
+void decodeHuffman(I, O)(I source, ref O destination) @safe
 {
-	ubyte[] block = cast(ubyte[])buf;
+	auto block = cast(immutable(ubyte)[])source;
 
 	char state = 0;
-	char[] decoded;
 	char eos = true; // termination flag
 
 	while(!block.empty) {
-		char ch = cast(ubyte)block[0];
+		char ch = block[0];
 		block.popFront();
-		decodeSymbol(decoded, state, ch >> 4, eos);
-		decodeSymbol(decoded, state, ch & 0xf, eos);
+		decodeSymbol(destination, state, ch >> 4, eos);
+		decodeSymbol(destination, state, ch & 0xf, eos);
 	}
 
-	assert(eos, "Invalid decoded string");
-
-	return to!string(decoded);
+	assert(eos, "Invalid destination string");
 }
 
-private void decodeSymbol(ref char[] decoded, ref char state, int pos, ref char eos) @safe
+private void decodeSymbol(O)(ref O decoded, ref char state, int pos, ref char eos)
+@safe
 {
 	assert(state < 256 && pos < 16, "Invalid entry reference");
 	auto entry = HuffDecodeCodes[state][pos];
 	assert(entry.next != state, "Invalid symbol");
 
 	if (entry.emit) { // if the symbol is terminal
-		decoded ~= entry.symbol;
+		char sym = entry.symbol;
+		decoded.put(sym);
 	}
 
 	state = entry.next;
 	eos = entry.ending;
+}
+
+unittest {
+	import std.array;
+	immutable ubyte[] test = [0xf1, 0xe3, 0xc2, 0xe5, 0xf2, 0x3a, 0x6b, 0xa0, 0xab, 0x90, 0xf4, 0xff];
+
+	auto dst = appender!string;
+	decodeHuffman(test, dst);
+	assert(dst.data == "www.example.com");
+
+	immutable char[] ctest = [0xf1, 0xe3, 0xc2, 0xe5, 0xf2, 0x3a, 0x6b, 0xa0, 0xab, 0x90, 0xf4, 0xff];
+	auto dst2 = appender!string;
+	decodeHuffman(ctest, dst2);
+	assert(dst2.data == "www.example.com");
+}
+
+@nogc unittest {
+	import vibe.internal.array : BatchBuffer;
+
+	immutable ubyte[12] src = [0xf1, 0xe3, 0xc2, 0xe5, 0xf2, 0x3a, 0x6b, 0xa0, 0xab, 0x90, 0xf4, 0xff];
+	//BatchBuffer!char bres;
+	BatchBuffer!(char, 15) bres;
+	bres.putN(15);
+	decodeHuffman(src, bres);
+	assert(bres.peekDst == "www.example.com");
 }
 
 private struct HuffCode {
@@ -48,14 +72,6 @@ private struct HuffCode {
 	char emit;
 	char symbol;
 	char ending;
-}
-
-unittest {
-	ubyte[] test = [0xf1, 0xe3, 0xc2, 0xe5, 0xf2, 0x3a, 0x6b, 0xa0, 0xab, 0x90, 0xf4, 0xff];
-	assert(decodeHuffman(test) == "www.example.com");
-
-	char[] ctest = [0xf1, 0xe3, 0xc2, 0xe5, 0xf2, 0x3a, 0x6b, 0xa0, 0xab, 0x90, 0xf4, 0xff];
-	assert(decodeHuffman(ctest) == "www.example.com");
 }
 
 private static immutable HuffCode[16][256] HuffDecodeCodes = [

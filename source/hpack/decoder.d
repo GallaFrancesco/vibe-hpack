@@ -7,6 +7,7 @@ import HPACK.util;
 
 import std.range; // Decoder
 import std.bitmanip; // prefix encoding / decoding
+import std.string : representation;
 
 /** Module to implement an header decoder consistent with HPACK specifications (RFC 7541)
   * The detailed description of the decoding process, examples and binary format details can
@@ -24,7 +25,7 @@ struct HeaderDecoder(T = ubyte[])
 		if (isInputRange!T && (is(ElementType!T : char) || (is(ElementType!T : ubyte))))
 {
 	private {
-		ubyte[] m_range;
+		immutable(ubyte)[] m_range;
 		IndexingTable m_table; // only for retrieving data
 		HTTP2HeaderTableField[] m_decoded;
 		HTTP2HeaderTableField[] m_index; // to be appended
@@ -33,8 +34,10 @@ struct HeaderDecoder(T = ubyte[])
 
 	this(T range, IndexingTable table) @trusted
 	{
-		static if(is(ElementType!T : char)) m_range = cast(ubyte[])range;
-		else m_range = range;
+		//static if(is(ElementType!T : char)) m_range = cast(ubyte[])range;
+		static if(is(typeof(representation(range)) == immutable(ubyte)[])) m_range = range;
+		else m_range = cast(immutable(ubyte)[])range;
+
 		m_table = table;
 
 		decode();
@@ -90,56 +93,49 @@ struct HeaderDecoder(T = ubyte[])
 				auto bbuf = m_range[0].toBitArray();
 				m_range = m_range[1..$];
 
+				if(bbuf[0]) {
+					auto res = decodeInteger(bbuf);
+					m_decoded ~= m_table[res];
+				} else {
+					HTTP2HeaderTableField hres;
+					bool update = false;
 
-				switch(bbuf[0]) {
-					case 1: // indexed (integer)
-						auto res = decodeInteger(bbuf);
-						m_decoded ~= m_table[res];
-						break;
-					case 0: // literal
-						HTTP2HeaderTableField hres;
-						bool update = false;
-
-						if (bbuf[1]) { // inserted in dynamic table
-							auto idx = bbuf.toInteger(2);
-							if(idx > 0) {  // name == table[index].name, value == literal
-								hres.name = m_table[idx].name;
-							} else {   // name == literal, value == literal
-								hres.name = decodeLiteral();
-							}
-							hres.value = decodeLiteral();
-							m_index ~= hres;
-
-						} else if(bbuf[3]) { // NEVER inserted in dynamic table
-							auto idx = bbuf.toInteger(4);
-							if(idx > 0) {  // name == table[index].name, value == literal
-								hres.name = m_table[idx].name;
-							} else {   // name == literal, value == literal
-								hres.name = decodeLiteral();
-							}
-							hres.value = decodeLiteral();
-							m_noindex ~= hres;
-
-						} else if(!bbuf[2]) { // this occourrence is not inserted in dynamic table
-							auto idx = bbuf.toInteger(4);
-							if(idx > 0) {  // name == table[index].name, value == literal
-								hres.name = m_table[idx].name;
-							} else {   // name == literal, value == literal
-								hres.name = decodeLiteral();
-							}
-							hres.value = decodeLiteral();
-
-						} else { // dynamic table size update (bbuf[2] is set)
-							update = true;
-							auto nsize = bbuf.toInteger(3);
-							m_table.updateSize(cast(HTTP2SettingValue)nsize);
+					if (bbuf[1]) { // inserted in dynamic table
+						auto idx = bbuf.toInteger(2);
+						if(idx > 0) {  // name == table[index].name, value == literal
+							hres.name = m_table[idx].name;
+						} else {   // name == literal, value == literal
+							hres.name = decodeLiteral();
 						}
+						hres.value = decodeLiteral();
+						m_index ~= hres;
 
-						if(!update) m_decoded ~= hres;
-						break;
+					} else if(bbuf[3]) { // NEVER inserted in dynamic table
+						auto idx = bbuf.toInteger(4);
+						if(idx > 0) {  // name == table[index].name, value == literal
+							hres.name = m_table[idx].name;
+						} else {   // name == literal, value == literal
+							hres.name = decodeLiteral();
+						}
+						hres.value = decodeLiteral();
+						m_noindex ~= hres;
 
-					default:
-						assert(false, "Invalid header block.");
+					} else if(!bbuf[2]) { // this occourrence is not inserted in dynamic table
+						auto idx = bbuf.toInteger(4);
+						if(idx > 0) {  // name == table[index].name, value == literal
+							hres.name = m_table[idx].name;
+						} else {   // name == literal, value == literal
+							hres.name = decodeLiteral();
+						}
+						hres.value = decodeLiteral();
+
+					} else { // dynamic table size update (bbuf[2] is set)
+						update = true;
+						auto nsize = bbuf.toInteger(3);
+						m_table.updateSize(cast(HTTP2SettingValue)nsize);
+					}
+
+					if(!update) m_decoded ~= hres;
 				}
 			}
 

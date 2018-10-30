@@ -1,5 +1,5 @@
 //module vibe.http.internal.hpack.tables;
-module HPACK.tables;
+module hpack.tables;
 
 import vibe.http.status;
 import vibe.http.common;

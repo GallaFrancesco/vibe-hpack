@@ -1,6 +1,6 @@
-module HPACK.huffman;
+module hpack.huffman;
 
-import HPACK.exception;
+import hpack.exception;
 
 import std.range;
 import std.conv : to;

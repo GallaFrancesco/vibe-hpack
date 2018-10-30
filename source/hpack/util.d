@@ -1,4 +1,4 @@
-module HPACK.util;
+module hpack.util;
 
 import std.range;
 import std.traits;

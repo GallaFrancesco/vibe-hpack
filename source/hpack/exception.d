@@ -1,4 +1,4 @@
-module HPACK.exception;
+module hpack.exception;
 
 public import std.exception;
 

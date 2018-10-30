@@ -1,9 +1,9 @@
-module HPACK.decoder;
+module hpack.decoder;
 
-import HPACK.exception;
-import HPACK.huffman;
-import HPACK.tables;
-import HPACK.util;
+import hpack.exception;
+import hpack.huffman;
+import hpack.tables;
+import hpack.util;
 
 import std.range; // Decoder
 import std.string : representation;

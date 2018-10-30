@@ -7,6 +7,8 @@ import HPACK.util;
 
 import std.range; // Decoder
 import std.string : representation;
+import std.array;
+import std.typecons : tuple;
 
 /** Module to implement an header decoder consistent with HPACK specifications (RFC 7541)
   * The detailed description of the decoding process, examples and binary format details can
@@ -27,13 +29,10 @@ struct HeaderDecoder(T = ubyte[])
 		immutable(ubyte)[] m_range;
 		IndexingTable m_table; // only for retrieving data
 		HTTP2HeaderTableField m_decoded;
-		HTTP2HeaderTableField[] m_index; // to be appended
-		HTTP2HeaderTableField[] m_noindex;
 	}
 
 	this(T range, IndexingTable table) @trusted
 	{
-		//static if(is(ElementType!T : char)) m_range = cast(ubyte[])range;
 		static if(is(typeof(representation(range)) == immutable(ubyte)[])) m_range = range;
 		else m_range = cast(immutable(ubyte)[])range;
 
@@ -45,7 +44,7 @@ struct HeaderDecoder(T = ubyte[])
 // InputRange specific methods
 	@property bool empty() @safe @nogc { return m_range.empty; }
 
-	@property HTTP2HeaderTableField front() @safe @nogc { return m_decoded; }
+	@property auto front() @safe @nogc { return m_decoded; }
 
 	void popFront() @safe
 	{
@@ -63,9 +62,9 @@ struct HeaderDecoder(T = ubyte[])
 		decode();
 	}
 
-	@property HTTP2HeaderTableField[] toIndex() @safe @nogc { return m_index; }
+	@property bool toIndex() @safe @nogc { return m_decoded.index; }
 
-	@property HTTP2HeaderTableField[] neverIndexed() @safe @nogc { return m_noindex; }
+	@property bool neverIndexed() @safe @nogc { return m_decoded.neverIndex; }
 
 // decoding
 	private {
@@ -90,7 +89,8 @@ struct HeaderDecoder(T = ubyte[])
 						hres.name = decodeLiteral();
 					}
 					hres.value = decodeLiteral();
-					m_index ~= hres;
+					hres.index = true;
+					hres.neverIndex = false;
 
 				} else if(bbuf & 16) { // NEVER inserted in dynamic table
 					auto idx = bbuf.toInteger(4);
@@ -100,7 +100,8 @@ struct HeaderDecoder(T = ubyte[])
 						hres.name = decodeLiteral();
 					}
 					hres.value = decodeLiteral();
-					m_noindex ~= hres;
+					hres.index = false;
+					hres.neverIndex = true;
 
 				} else if(!(bbuf & 32)) { // this occourrence is not inserted in dynamic table
 					auto idx = bbuf.toInteger(4);
@@ -110,12 +111,14 @@ struct HeaderDecoder(T = ubyte[])
 						hres.name = decodeLiteral();
 					}
 					hres.value = decodeLiteral();
+					hres.index = hres.neverIndex = false;
 
 				} else { // dynamic table size update (bbuf[2] is set)
 					update = true;
 					auto nsize = bbuf.toInteger(3);
 					m_table.updateSize(cast(HTTP2SettingValue)nsize);
 				}
+				assert(!(hres.index && hres.neverIndex), "Invalid header indexing information");
 
 				if(!update) m_decoded = hres;
 			}
@@ -147,7 +150,7 @@ struct HeaderDecoder(T = ubyte[])
 			ubyte bbuf = m_range[0];
 			m_range = m_range[1..$];
 
-			string res;
+			auto res = appender!string; // TODO a proper allocator
 			bool huffman = (bbuf & 128) ? true : false;
 
 
@@ -159,11 +162,11 @@ struct HeaderDecoder(T = ubyte[])
 			m_range = m_range[vlen..$];
 
 			if(huffman) { // huffman encoded
-				res = decodeHuffman(buf);
+				decodeHuffman(buf, res);
 			} else { // raw encoded
-				res = cast(string)(buf);
+				res.put(buf);
 			}
-			return res;
+			return res.data;
 		}
 	}
 }
@@ -181,7 +184,7 @@ unittest {
 	auto decoder = HeaderDecoder!(ubyte[])(block, table);
 	assert(decoder.front.name == "custom-key" && decoder.front.value == "custom-header");
 	// check entries to be inserted in the indexing table (dynamic)
-	assert(decoder.toIndex.front.name == "custom-key" && decoder.toIndex.front.value == "custom-header");
+	assert(decoder.front.index);
 
 	/** 1bis. Literal header field w. indexing (huffman encoded)
 	  * :authority: www.example.com
@@ -189,7 +192,7 @@ unittest {
 	block = [0x41, 0x8c, 0xf1, 0xe3, 0xc2, 0xe5, 0xf2, 0x3a, 0x6b, 0xa0, 0xab, 0x90, 0xf4, 0xff];
 	decoder.put(block);
 	assert(decoder.front.name == ":authority" && decoder.front.value == "www.example.com");
-	assert(decoder.toIndex.back.name == ":authority" && decoder.toIndex.back.value == "www.example.com");
+	assert(decoder.front.index);
 
 	/** 2. Literal header field without indexing (raw)
 	  * :path: /sample/path
@@ -206,7 +209,7 @@ unittest {
 		  0x63, 0x72, 0x65, 0x74];
 	decoder.put(block);
 	assert(decoder.front.name == "password" && decoder.front.value == "secret");
-	assert(decoder.neverIndexed.back.name == "password" && decoder.neverIndexed.back.value == "secret");
+	assert(decoder.front.neverIndex);
 
 
 	/** 4. Indexed header field (integer)

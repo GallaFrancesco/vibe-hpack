@@ -70,6 +70,8 @@ struct HTTP2HeaderTableField {
 
 	string name;
 	TaggedAlgebraic!HeaderValue value;
+	bool index = true;
+	bool neverIndex = false;
 
 	// initializers
 	static foreach(t; __traits(allMembers, HeaderValue)) {

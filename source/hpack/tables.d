@@ -155,7 +155,7 @@ static this() {
 	];
 }
 
-private ref immutable(HTTP2HeaderTableField) getStaticTableEntry(size_t key) @safe
+private ref immutable(HTTP2HeaderTableField) getStaticTableEntry(size_t key) @safe @nogc
 {
     assert(key > 0 && key < StaticTable.length, "Invalid static table index");
     return StaticTable[key];
@@ -198,13 +198,13 @@ private struct DynamicTable {
 	}
 
 	// number of elements inside dynamic table
-	@property size_t size() @safe { return m_size; }
+	@property size_t size() @safe @nogc { return m_size; }
 
-	@property size_t index() @safe { return m_index; }
+	@property size_t index() @safe @nogc { return m_index; }
 
-	@property ref auto table() @safe { return m_table; }
+	@property ref auto table() @safe @nogc { return m_table; }
 
-	HTTP2HeaderTableField opIndex(size_t idx) @safe
+	HTTP2HeaderTableField opIndex(size_t idx) @safe @nogc
 	{
 		assert(idx > 0 && idx <= m_index, "Invalid table index");
 		return m_table[idx-1];
@@ -216,7 +216,7 @@ private struct DynamicTable {
 		auto nsize = computeEntrySize(header);
 		// ensure that the new entry does not exceed table capacity
 		while(m_size + nsize > m_maxsize) {
-			logDebug("Maximum header table size exceeded");
+			//logInfo("Maximum header table size exceeded"); // requires gc
 			remove();
 		}
 
@@ -241,7 +241,7 @@ private struct DynamicTable {
 	  * if multiple changes occour, only the smallest maximum size
 	  * requested has to be acknowledged
 	*/
-	void updateSize(HTTP2SettingValue sz) @safe
+	void updateSize(HTTP2SettingValue sz) @safe @nogc
 	{
 		m_maxsize = sz;
 	}
@@ -283,15 +283,15 @@ struct IndexingTable {
 	}
 
 	// requires the maximum size for the dynamic table
-	this(HTTP2SettingValue ms)
+	this(HTTP2SettingValue ms) @trusted
 	{
 		m_dynamic = DynamicTable(ms);
 	}
 
-	@property size_t size() @safe { return STATIC_TABLE_SIZE + m_dynamic.index + 1; }
+	@property size_t size() @safe @nogc { return STATIC_TABLE_SIZE + m_dynamic.index + 1; }
 
 	// element retrieval
-	HTTP2HeaderTableField opIndex(size_t idx) @safe
+	HTTP2HeaderTableField opIndex(size_t idx) @safe @nogc
 	{
 		assert(idx > 0 && idx <= size(), "Invalid table index");
 
@@ -301,7 +301,7 @@ struct IndexingTable {
 
 	// dollar == size
 	// +1 to mantain consistency with the dollar operator
-	size_t opDollar() @safe
+	size_t opDollar() @safe @nogc
 	{
 		return size();
 	}
@@ -313,7 +313,7 @@ struct IndexingTable {
 	}
 
 	// update max dynamic table size
-	void updateSize(HTTP2SettingValue sz) @safe
+	void updateSize(HTTP2SettingValue sz) @safe @nogc
 	{
 		m_dynamic.updateSize(sz);
 	}

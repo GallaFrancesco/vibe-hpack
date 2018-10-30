@@ -6,7 +6,6 @@ import HPACK.tables;
 import HPACK.util;
 
 import std.range; // Decoder
-import std.bitmanip; // prefix encoding / decoding
 import std.string : representation;
 
 /** Module to implement an header decoder consistent with HPACK specifications (RFC 7541)
@@ -44,13 +43,13 @@ struct HeaderDecoder(T = ubyte[])
 	}
 
 // InputRange specific methods
-	@property bool empty() @safe { return m_range.empty; }
+	@property bool empty() @safe @nogc { return m_range.empty; }
 
-	@property HTTP2HeaderTableField front() @safe { return m_decoded; }
+	@property HTTP2HeaderTableField front() @safe @nogc { return m_decoded; }
 
-	void popFront() @trusted
+	void popFront() @safe
 	{
-		enforce!HPACKException(!empty, "Cannot call popFront on an empty HeaderDecoder");
+		assert(!empty, "Cannot call popFront on an empty HeaderDecoder");
 
 		// advance if data is still available
 		decode();
@@ -59,31 +58,31 @@ struct HeaderDecoder(T = ubyte[])
 	void put(T)(T range) @trusted
 	{
 		static if(is(typeof(representation(range)) == immutable(ubyte)[])) m_range = range;
-		else m_range = cast(immutable(ubyte)[])range;
+		else m_range ~= cast(immutable(ubyte)[])range;
 
 		decode();
 	}
 
-	@property HTTP2HeaderTableField[] toIndex() @safe { return m_index; }
+	@property HTTP2HeaderTableField[] toIndex() @safe @nogc { return m_index; }
 
-	@property HTTP2HeaderTableField[] neverIndexed() @safe { return m_noindex; }
+	@property HTTP2HeaderTableField[] neverIndexed() @safe @nogc { return m_noindex; }
 
 // decoding
 	private {
 
-		void decode() @trusted
+		void decode() @safe
 		{
-			auto bbuf = m_range[0].toBitArray();
+			ubyte bbuf = m_range[0];
 			m_range = m_range[1..$];
 
-			if(bbuf[0]) {
+			if(bbuf & 128) {
 				auto res = decodeInteger(bbuf);
 				m_decoded = m_table[res];
 			} else {
 				HTTP2HeaderTableField hres;
 				bool update = false;
 
-				if (bbuf[1]) { // inserted in dynamic table
+				if (bbuf & 64) { // inserted in dynamic table
 					auto idx = bbuf.toInteger(2);
 					if(idx > 0) {  // name == table[index].name, value == literal
 						hres.name = m_table[idx].name;
@@ -93,7 +92,7 @@ struct HeaderDecoder(T = ubyte[])
 					hres.value = decodeLiteral();
 					m_index ~= hres;
 
-				} else if(bbuf[3]) { // NEVER inserted in dynamic table
+				} else if(bbuf & 16) { // NEVER inserted in dynamic table
 					auto idx = bbuf.toInteger(4);
 					if(idx > 0) {  // name == table[index].name, value == literal
 						hres.name = m_table[idx].name;
@@ -103,7 +102,7 @@ struct HeaderDecoder(T = ubyte[])
 					hres.value = decodeLiteral();
 					m_noindex ~= hres;
 
-				} else if(!bbuf[2]) { // this occourrence is not inserted in dynamic table
+				} else if(!(bbuf & 32)) { // this occourrence is not inserted in dynamic table
 					auto idx = bbuf.toInteger(4);
 					if(idx > 0) {  // name == table[index].name, value == literal
 						hres.name = m_table[idx].name;
@@ -122,7 +121,7 @@ struct HeaderDecoder(T = ubyte[])
 			}
 		}
 
-		size_t decodeInteger(BitArray bbuf) @trusted
+		size_t decodeInteger(ubyte bbuf) @safe @nogc
 		{
 			uint nbits = 7;
 			auto res = bbuf.toInteger(1);
@@ -133,30 +132,29 @@ struct HeaderDecoder(T = ubyte[])
 				uint m = 0;
 				do {
 					// take another octet
-					bbuf = m_range[0].toBitArray();
+					bbuf = m_range[0];
 					m_range = m_range[1..$];
 					// concatenate it to the result
 					res = res + bbuf.toInteger(1)*(1 << m);
 					m += 7;
-				} while(bbuf[0] == 1);
+				} while(bbuf == 1);
 				return res;
 			}
 		}
 
-		string decodeLiteral() @trusted
+		string decodeLiteral() @safe
 		{
-			auto bbuf = m_range[0].toBitArray();
+			ubyte bbuf = m_range[0];
 			m_range = m_range[1..$];
 
 			string res;
-			bool huffman = bbuf[0] ? true : false;
+			bool huffman = (bbuf & 128) ? true : false;
 
 
-			auto vlen = bbuf.toInteger(1); // value length
-			enforce!HPACKDecoderException(!m_range.empty,
-					"Cannot decode from empty range block");
+			assert(!m_range.empty, "Cannot decode from empty range block");
 
 			// take a buffer of remaining octets
+			auto vlen = bbuf.toInteger(1); // value length
 			auto buf = m_range[0..vlen];
 			m_range = m_range[vlen..$];
 
@@ -167,9 +165,7 @@ struct HeaderDecoder(T = ubyte[])
 			}
 			return res;
 		}
-
 	}
-
 }
 
 unittest {

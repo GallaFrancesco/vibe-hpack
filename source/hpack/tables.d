@@ -19,42 +19,32 @@ alias HTTP2SettingValue = uint;
 
 /*
 	2.3.  Indexing Tables
-
 	HPACK uses two tables for associating header fields to indexes.  The
 	static table (see Section 2.3.1) is predefined and contains common
 	header fields (most of them with an empty value).  The dynamic table
 	(see Section 2.3.2) is dynamic and can be used by the encoder to
 	index header fields repeated in the encoded header lists.
-
 	These two tables are combined into a single address space for
 	defining index values (see Section 2.3.3).
-
  2.3.1.  Static Table
-
 	The static table consists of a predefined static list of header
 	fields.  Its entries are defined in Appendix A.
-
  2.3.2.  Dynamic Table
-
 	The dynamic table consists of a list of header fields maintained in
 	first-in, first-out order.  The first and newest entry in a dynamic
 	table is at the lowest index, and the oldest entry of a dynamic tabl
 	is at the highest index.
 	The dynamic table is initially empty.  Entries are added as each
 	header block is decompressed.
-
 	The dynamic table is initially empty.  Entries are added as each
 	header block is decompressed.
-
 	The dynamic table can contain duplicate entries (i.e., entries with
 	the same name and same value).  Therefore, duplicate entries MUST NOT
 	be treated as an error by a decoder.
-
 	The encoder decides how to update the dynamic table and as such can
 	control how much memory is used by the dynamic table.  To limit the
 	memory requirements of the decoder, the dynamic table size is
 	strictly bounded (see Section 4.2).
-
 	The decoder updates the dynamic table during the processing of a list
 	of header field representations (see Section 3.2).
 */
@@ -292,12 +282,7 @@ struct IndexingTable {
 
 	@property size_t size() @safe @nogc { return STATIC_TABLE_SIZE + m_dynamic.index + 1; }
 
-<<<<<<< HEAD
-	// element retrieval
-	HTTP2HeaderTableField opIndex(size_t idx) @safe @nogc
-<<<<<<< HEAD
-=======
-	@property bool empty() @safe { return m_dynamic.size == 0; }
+	@property bool empty() @safe @nogc { return m_dynamic.size == 0; }
 
 	@property HTTP2HeaderTableField front() @safe { return this[0]; }
 
@@ -307,11 +292,8 @@ struct IndexingTable {
 		m_dynamic.remove();
 	}
 
-	// element retrieval 
-	HTTP2HeaderTableField opIndex(size_t idx) @safe
->>>>>>> 9ece47e... encode method outline
-=======
->>>>>>> 89e40cd... @nogc and removed std.bitmanip
+	// element retrieval
+	HTTP2HeaderTableField opIndex(size_t idx) @safe @nogc
 	{
 		assert(idx > 0 && idx <= size(), "Invalid table index");
 

@@ -1,9 +1,9 @@
-module HPACK.encoder;
+module hpack.encoder;
 
-import HPACK.tables;
-import HPACK.huffman;
-import HPACK.util;
-import HPACK.exception;
+import hpack.tables;
+import hpack.huffman;
+import hpack.util;
+import hpack.exception;
 
 import vibe.http.status;
 import vibe.http.common;
@@ -26,6 +26,7 @@ struct HeaderEncoder(T = HTTP2HeaderTableField[])
 		ubyte[] m_encoded;
 	}
 
+	// flag to select huffman encoding / raw encoding
 	bool huffman;
 
 	this(T range, IndexingTable table, bool huff = true) @trusted
@@ -40,11 +41,11 @@ struct HeaderEncoder(T = HTTP2HeaderTableField[])
 	}
 
 // InputRange specific methods
-	@property bool empty() @safe { return m_encoded.empty; }
+	@property bool empty() @safe @nogc { return m_encoded.empty; }
 
-	@property ubyte[] front() @safe { return m_encoded; }
+	@property ubyte[] front() @safe @nogc { return m_encoded; }
 
-	@property ubyte[] back() @safe { return m_encoded; }
+	@property ubyte[] back() @safe @nogc { return m_encoded; }
 
 	void popFront() @trusted
 	{
@@ -62,6 +63,17 @@ struct HeaderEncoder(T = HTTP2HeaderTableField[])
 		m_range.put(range);
 
 		encode();
+	}
+
+	/// utility to accumulate encoded bytes from multiple headers
+	@property void accumulate(Out)(ref Out dst) @safe
+	{
+		if(!empty) dst.put(m_encoded);
+
+		while(!m_range.empty) {
+			encode();
+			dst.put(m_encoded);
+		}
 	}
 
 	private {
@@ -82,38 +94,50 @@ struct HeaderEncoder(T = HTTP2HeaderTableField[])
 			// check table for indexed headers
 			size_t idx = 1;
 			auto bbuf = appender!(ubyte[]); // TODO a proper allocator
+			bool found = false;
+			size_t partialFound = false;
 			while(idx < m_table.size) {
 				// encode both name / value as index
 				auto h = m_table[idx];
 				if(h.name == header.name && h.value == header.value) {
-					if(idx < 127) { // can be fit in one octet
-						bbuf.put(cast(ubyte)(idx ^ 128));
-					} else { 		// must be split in multiple octets
-						bbuf.put(cast(ubyte)255);
-						idx -= 127;
-						while (idx > 127) {
-							bbuf.put(cast(ubyte)((idx % 128) ^ 128));
-							idx = idx / 128;
-						}
-						bbuf.put(cast(ubyte)(idx & 127));
-					}
-					m_encoded = bbuf.data;
-					return true;
-
+					found = true;
+					partialFound = false;
+					break;
 				// encode name as index, value as literal
 				} else if(h.name == header.name && h.value != header.value) {
-					// encode name as index ( always smaller than 64 )
-					if(header.index) bbuf.put(cast(ubyte)((idx + 64) & 127));
-					else if (header.neverIndex) bbuf.put(cast(ubyte)((idx + 16) & 31));
-					else bbuf.put(cast(ubyte)(idx & 15));
-					// encode value as literal
-					encodeLiteralField(to!string(header.value), bbuf);
-
-					m_encoded = bbuf.data;
-					return true;
+					found = false;
+					partialFound = idx;
 				}
 				idx++;
 			}
+
+			if(found) {
+				if(idx < 127) { // can be fit in one octet
+					bbuf.put(cast(ubyte)(idx ^ 128));
+				} else { 		// must be split in multiple octets
+					bbuf.put(cast(ubyte)255);
+					idx -= 127;
+					while (idx > 127) {
+						bbuf.put(cast(ubyte)((idx % 128) ^ 128));
+						idx = idx / 128;
+					}
+					bbuf.put(cast(ubyte)(idx & 127));
+				}
+				m_encoded = bbuf.data;
+				return true;
+
+			} else if(partialFound) {
+				// encode name as index ( always smaller than 64 )
+				if(header.index) bbuf.put(cast(ubyte)((partialFound + 64) & 127));
+				else if (header.neverIndex) bbuf.put(cast(ubyte)((partialFound + 16) & 31));
+				else bbuf.put(cast(ubyte)(partialFound & 15));
+				// encode value as literal
+				encodeLiteralField(to!string(header.value), bbuf);
+
+				m_encoded = bbuf.data;
+				return true;
+			}
+
 			return false;
 		}
 
@@ -152,13 +176,13 @@ struct HeaderEncoder(T = HTTP2HeaderTableField[])
 
 unittest {
 	// Following examples can be found in Appendix C of the HPACK RFC
-	import HPACK.decoder;
-	IndexingTable table;
+	import std.stdio;
+	import hpack.decoder;
+	IndexingTable table = IndexingTable(4096);
 
 	/** 1. Literal header field w. indexing (raw)
 	  * custom-key: custom-header
 	  */
-	// TODO encodeLiteral
 	HTTP2HeaderTableField h1 = HTTP2HeaderTableField("custom-key", "custom-header");
 	auto e1 = HeaderEncoder!(HTTP2HeaderTableField)(h1, table, false);
 	auto d1 = HeaderDecoder!(ubyte[])(e1.front, table);
@@ -167,7 +191,10 @@ unittest {
 	/** 1bis. Literal header field w. indexing (huffman encoded)
 	  * :authority: www.example.com
 	  */
+	table.insert(HTTP2HeaderTableField(":authority", "www.example.com"));
 	HTTP2HeaderTableField h1b = HTTP2HeaderTableField(":authority", "www.example.com");
+	h1b.neverIndex = false;
+	h1b.index = true;
 	auto e1b = HeaderEncoder!(HTTP2HeaderTableField)(h1b, table);
 	auto d1b = HeaderDecoder!(ubyte[])(e1b.front, table);
 	assert(d1b.front == h1b);
@@ -176,6 +203,8 @@ unittest {
 	  * :path: /sample/path
 	  */
 	HTTP2HeaderTableField h2 = HTTP2HeaderTableField(":path", "/sample/path");
+	h2.neverIndex = false;
+	h2.index = false;
 	// initialize with huffman=false (can be modified by e2.huffman)
 	auto e2 = HeaderEncoder!(HTTP2HeaderTableField)(h2, table, false);
 	auto d2 = HeaderDecoder!(ubyte[])(e2.front, table);
@@ -184,7 +213,6 @@ unittest {
 	/** 3. Literal header field never indexed (raw)
 	  * password: secret
 	  */
-	// TODO encodeLiteral
 	HTTP2HeaderTableField h3 = HTTP2HeaderTableField("password", "secret");
 	h3.neverIndex = true;
 	h3.index = false;
@@ -192,7 +220,7 @@ unittest {
 	auto d3 = HeaderDecoder!(ubyte[])(e3.front, table);
 	assert(d3.front == h3);
 
-	/** 4. Indexed header field (integer) 
+	/** 4. Indexed header field (integer)
 	  * :method: GET
 	  */
 	HTTP2HeaderTableField h4 = HTTP2HeaderTableField(":method", HTTPMethod.GET);
@@ -200,4 +228,38 @@ unittest {
 	auto d4 = HeaderDecoder!(ubyte[])(e4.front, table);
 	assert(d4.front == h4);
 
+	/** 5. Full request without huffman encoding
+	  * :method: GET
+      * :scheme: http
+      * :path: /
+      * :authority: www.example.com
+      * cache-control: no-cache
+	  */
+	import vibe.internal.array : BatchBuffer;
+	HTTP2HeaderTableField[] block = [
+		HTTP2HeaderTableField(":method", HTTPMethod.GET),
+		HTTP2HeaderTableField(":scheme", "http"),
+		HTTP2HeaderTableField(":path", "/"),
+		HTTP2HeaderTableField(":authority", "www.example.com"),
+		HTTP2HeaderTableField("cache-control", "no-cache")
+	];
+
+	ubyte[14] expected = [0x82, 0x86, 0x84, 0xbe, 0x58, 0x08, 0x6e, 0x6f, 0x2d, 0x63, 0x61, 0x63, 0x68, 0x65];
+	auto renc = HeaderEncoder!(HTTP2HeaderTableField[])(block, table, false);
+	auto bres = appender!(ubyte[]);
+	renc.accumulate(bres);
+	assert(bres.data == expected);
+
+	/** 5. Full request with huffman encoding
+	  * :method: GET
+      * :scheme: http
+      * :path: /
+      * :authority: www.example.com
+      * cache-control: no-cache
+	  */
+	ubyte[12] eexpected = [0x82, 0x86, 0x84, 0xbe, 0x58, 0x86, 0xa8, 0xeb, 0x10, 0x64, 0x9c, 0xbf];
+	auto rrenc = HeaderEncoder!(HTTP2HeaderTableField[])(block, table);
+	auto bbres = appender!(ubyte[]);
+	rrenc.accumulate(bbres);
+	assert(bbres.data == eexpected);
 }

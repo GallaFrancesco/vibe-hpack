@@ -1,11 +1,8 @@
-module HPACK.huffman;
+module hpack.huffman;
 
-import HPACK.exception;
-import HPACK.util;
+import hpack.exception;
 
 import std.range;
-import std.conv : to;
-import std.typecons; // tuple
 
 /** Huffman encoding for HPACK header compression
   * The huffman table specifications can be found at:
@@ -53,15 +50,7 @@ size_t encodeHuffman(I, O)(I source, ref O destination) @safe
 */
 void decodeHuffman(I, O)(I source, ref O destination) @safe
 {
-<<<<<<< HEAD
-<<<<<<< HEAD
 	auto block = cast(immutable(ubyte)[])source;
-=======
-	auto block = cast(immutable(ubyte)[])buf;
->>>>>>> 085094d... m_range as immutable, std.string.representation
-=======
-	auto block = cast(immutable(ubyte)[])source;
->>>>>>> d64b1a5... decodeHuffman output-range based
 
 	char state = 0;
 	char eos = true; // termination flag
@@ -72,17 +61,8 @@ void decodeHuffman(I, O)(I source, ref O destination) @safe
 		decodeSymbol(destination, state, ch >> 4, eos);
 		decodeSymbol(destination, state, ch & 0xf, eos);
 	}
-<<<<<<< HEAD
 
 	assert(eos, "Invalid destination string");
-<<<<<<< HEAD
-=======
-	assert(eos, "Invalid decoded string");
-
-	return to!string(decoded);
->>>>>>> f5687a9... huffman encoding
-=======
->>>>>>> d64b1a5... decodeHuffman output-range based
 }
 
 private void decodeSymbol(O)(ref O decoded, ref char state, int pos, ref char eos)
@@ -102,10 +82,6 @@ private void decodeSymbol(O)(ref O decoded, ref char state, int pos, ref char eo
 }
 
 unittest {
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> d64b1a5... decodeHuffman output-range based
 	import std.array;
 	immutable ubyte[] test = [0xf1, 0xe3, 0xc2, 0xe5, 0xf2, 0x3a, 0x6b, 0xa0, 0xab, 0x90, 0xf4, 0xff];
 
@@ -117,44 +93,6 @@ unittest {
 	auto dst2 = appender!string;
 	decodeHuffman(ctest, dst2);
 	assert(dst2.data == "www.example.com");
-<<<<<<< HEAD
-}
-
-<<<<<<< HEAD
-@nogc unittest {
-	import vibe.internal.array : BatchBuffer;
-
-	immutable ubyte[12] src = [0xf1, 0xe3, 0xc2, 0xe5, 0xf2, 0x3a, 0x6b, 0xa0, 0xab, 0x90, 0xf4, 0xff];
-	//BatchBuffer!char bres;
-	BatchBuffer!(char, 15) bres;
-	bres.putN(15);
-	decodeHuffman(src, bres);
-	assert(bres.peekDst == "www.example.com");
-}
-
-private struct HuffCode {
-=======
-	ubyte[] test = [0xf1, 0xe3, 0xc2, 0xe5, 0xf2, 0x3a, 0x6b, 0xa0, 0xab, 0x90, 0xf4, 0xff];
-=======
-unittest {
-	immutable ubyte[] test = [0xf1, 0xe3, 0xc2, 0xe5, 0xf2, 0x3a, 0x6b, 0xa0, 0xab, 0x90, 0xf4, 0xff];
->>>>>>> 085094d... m_range as immutable, std.string.representation
-	assert(decodeHuffman(test) == "www.example.com");
-
-	immutable char[] ctest = [0xf1, 0xe3, 0xc2, 0xe5, 0xf2, 0x3a, 0x6b, 0xa0, 0xab, 0x90, 0xf4, 0xff];
-	assert(decodeHuffman(ctest) == "www.example.com");
-}
-
-private struct HuffDecCode {
->>>>>>> 8fa777e... encode integer and literal value
-	char next;
-	char emit;
-	char symbol;
-	char ending;
-}
-
-<<<<<<< HEAD
-=======
 }
 
 @nogc unittest {
@@ -175,9 +113,6 @@ private struct HuffCode {
 	char ending;
 }
 
->>>>>>> d64b1a5... decodeHuffman output-range based
-private static immutable HuffCode[16][256] HuffDecodeCodes = [
-=======
 private struct HuffEncCode {
 	uint code;
 	size_t length;
@@ -250,12 +185,7 @@ private static immutable HuffEncCode[256] HuffEncodeCodes = [
     {0x07ffffee, 27}, {0x07ffffef, 27}, {0x07fffff0, 27}, {0x03ffffee, 26}
 ];
 
-<<<<<<< HEAD
-private static immutable HuffDecCode[16][256] HuffDecodeCodes = [
->>>>>>> 8fa777e... encode integer and literal value
-=======
 private static immutable HuffCode[16][256] HuffDecodeCodes = [
->>>>>>> 95c4ef3... encodeHuffman output-range based
 	/* 0 */
 	[
 // 		 next  emit  sym  ending   next  emit  sym  ending
@@ -2870,4 +2800,3 @@ private static immutable HuffCode[16][256] HuffDecodeCodes = [
 		{0xff, 0x00, 0x00, 0x00}, {0xff, 0x00, 0x00, 0x00}
 	]
 ];
-

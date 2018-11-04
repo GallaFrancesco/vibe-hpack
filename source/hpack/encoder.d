@@ -8,7 +8,8 @@ import std.typecons;
 import std.conv;
 import std.array;
 
-void encode(R)(HTTP2HeaderTableField header, ref R dst, ref IndexingTable table, bool huffman = true) @safe
+void encode(R)(HTTP2HeaderTableField header, ref R dst, ref IndexingTable table, bool huffman = true)
+@safe
 {
 	// try to encode as integer
 	bool indexed = encodeInteger(header, dst, table, huffman);
@@ -17,7 +18,8 @@ void encode(R)(HTTP2HeaderTableField header, ref R dst, ref IndexingTable table,
 }
 
 /// encode a pure integer (present in table) or integer name + literal value
-private bool encodeInteger(R)(const HTTP2HeaderTableField header, ref R dst, ref IndexingTable table, bool huffman) @safe
+private bool encodeInteger(R)(const HTTP2HeaderTableField header, ref R dst, ref IndexingTable table, bool huffman)
+@safe
 {
 	// check table for indexed headers
 	size_t idx = 1;
@@ -68,7 +70,8 @@ private bool encodeInteger(R)(const HTTP2HeaderTableField header, ref R dst, ref
 }
 
 /// encode a literal field depending on its indexing requirements
-private void encodeLiteral(R)(const HTTP2HeaderTableField header, ref R dst, bool huffman) @safe
+private void encodeLiteral(R)(const HTTP2HeaderTableField header, ref R dst, bool huffman)
+@safe
 {
 	if(header.index) dst.put(cast(ubyte)(64));
 	else if(header.neverIndex) dst.put(cast(ubyte)(16));
@@ -82,10 +85,7 @@ private void encodeLiteral(R)(const HTTP2HeaderTableField header, ref R dst, boo
 private void encodeLiteralField(R)(string src, ref R dst, bool huffman) @safe
 {
 	if(huffman) {
-		auto hbuf = appender!(ubyte[]); // TODO a proper allocator
-		auto len = encodeHuffman(src, hbuf);
-		dst.put(cast(ubyte)((len/8 ^ 128) + 1));
-		dst.put(hbuf.data);
+		encodeHuffman(src, dst);
 	} else {
 		auto blen = (src.length) & 127;
 		dst.put(cast(ubyte)blen);

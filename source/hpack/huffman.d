@@ -8,19 +8,26 @@ import std.range;
   * The huffman table specifications can be found at:
   * Appendix B of RFC 7541: https://tools.ietf.org/html/rfc7541#appendix-B
 */
-size_t encodeHuffman(I, O)(I source, ref O destination) @safe
+void encodeHuffman(I, O)(I source, ref O dst) @safe
 {
 	ulong bits;
 	int bitsLeft = 40;
 	size_t len = 0;
 
+	// compute length
+	foreach(c; source) {
+		auto e = HuffEncodeCodes[c];
+		len += e.length;
+	}
+
+	dst.put(cast(ubyte)((len/8 ^ 128) + 1));
+
 	foreach(c; source) {
 		auto e = HuffEncodeCodes[c];
 		bits |= (cast(ulong)e.code) << (bitsLeft - e.length);
 		bitsLeft -= e.length;
-		len += e.length;
 		while(bitsLeft <= 32) {
-			destination.put(cast(ubyte)(bits >> 32));
+			dst.put(cast(ubyte)(bits >> 32));
 			bits <<= 8;
 			bitsLeft += 8;
 		}
@@ -28,18 +35,17 @@ size_t encodeHuffman(I, O)(I source, ref O destination) @safe
 
 	if(bitsLeft != 40) {
 		bits |= ((cast(ulong)1) << bitsLeft) - 1;
-		destination.put(cast(ubyte)(bits >> 32));
+		dst.put(cast(ubyte)(bits >> 32));
 	}
-	return len;
 }
 
 @nogc unittest {
 	import vibe.internal.array : BatchBuffer;
 
 	string src = "www.example.com";
-	BatchBuffer!(ubyte, 12) bres;
-	bres.putN(12);
-	ubyte[12] expected = [0xf1, 0xe3, 0xc2, 0xe5, 0xf2, 0x3a, 0x6b, 0xa0, 0xab, 0x90, 0xf4, 0xff];
+	BatchBuffer!(ubyte, 13) bres;
+	bres.putN(13);
+	ubyte[13] expected = [0x8c, 0xf1, 0xe3, 0xc2, 0xe5, 0xf2, 0x3a, 0x6b, 0xa0, 0xab, 0x90, 0xf4, 0xff];
 	encodeHuffman(src, bres);
 	assert(bres.peekDst == expected);
 }
@@ -48,7 +54,7 @@ size_t encodeHuffman(I, O)(I source, ref O destination) @safe
   * The huffman table specifications can be found at:
   * Appendix B of RFC 7541: https://tools.ietf.org/html/rfc7541#appendix-B
 */
-void decodeHuffman(I, O)(I source, ref O destination) @safe
+void decodeHuffman(I, O)(I source, ref O dst) @safe
 {
 	auto block = cast(immutable(ubyte)[])source;
 
@@ -58,11 +64,11 @@ void decodeHuffman(I, O)(I source, ref O destination) @safe
 	while(!block.empty) {
 		char ch = block[0];
 		block.popFront();
-		decodeSymbol(destination, state, ch >> 4, eos);
-		decodeSymbol(destination, state, ch & 0xf, eos);
+		decodeSymbol(dst, state, ch >> 4, eos);
+		decodeSymbol(dst, state, ch & 0xf, eos);
 	}
 
-	assert(eos, "Invalid destination string");
+	assert(eos, "Invalid dst string");
 }
 
 private void decodeSymbol(O)(ref O decoded, ref char state, int pos, ref char eos)

@@ -43,9 +43,9 @@ struct HeaderEncoder(T = HTTP2HeaderTableField[])
 // InputRange specific methods
 	@property bool empty() @safe @nogc { return m_encoded.empty; }
 
-	@property ubyte[] front() @safe @nogc { return m_encoded; }
+	@property ubyte front() @safe @nogc { return m_encoded.front; }
 
-	@property ubyte[] back() @safe @nogc { return m_encoded; }
+	@property ubyte[] peek() @safe @nogc { assert(!empty); return m_encoded; }
 
 	void popFront() @trusted
 	{
@@ -54,7 +54,7 @@ struct HeaderEncoder(T = HTTP2HeaderTableField[])
 		m_encoded.popFront();
 
 		// advance if data is still available
-		if(!m_range.empty) encode();
+		if(!m_range.empty && empty) encode();
 	}
 
 	void put(T)(T range) @safe
@@ -80,8 +80,8 @@ struct HeaderEncoder(T = HTTP2HeaderTableField[])
 		void encode() @trusted
 		{
 			// pop a header
-			auto header = m_range[0];
-			m_range = m_range[1..$];
+			auto header = m_range.front;
+			m_range.popFront;
 
 			// try to encode as integer
 			bool indexed = encodeInteger(header);
@@ -185,7 +185,7 @@ unittest {
 	  */
 	HTTP2HeaderTableField h1 = HTTP2HeaderTableField("custom-key", "custom-header");
 	auto e1 = HeaderEncoder!(HTTP2HeaderTableField)(h1, table, false);
-	auto d1 = HeaderDecoder!(ubyte[])(e1.front, table);
+	auto d1 = HeaderDecoder!(ubyte[])(e1.peek, table);
 	assert(d1.front == h1);
 
 	/** 1bis. Literal header field w. indexing (huffman encoded)
@@ -196,7 +196,7 @@ unittest {
 	h1b.neverIndex = false;
 	h1b.index = true;
 	auto e1b = HeaderEncoder!(HTTP2HeaderTableField)(h1b, table);
-	auto d1b = HeaderDecoder!(ubyte[])(e1b.front, table);
+	auto d1b = HeaderDecoder!(ubyte[])(e1b.peek, table);
 	assert(d1b.front == h1b);
 
 	/** 2. Literal header field without indexing (raw)
@@ -207,7 +207,7 @@ unittest {
 	h2.index = false;
 	// initialize with huffman=false (can be modified by e2.huffman)
 	auto e2 = HeaderEncoder!(HTTP2HeaderTableField)(h2, table, false);
-	auto d2 = HeaderDecoder!(ubyte[])(e2.front, table);
+	auto d2 = HeaderDecoder!(ubyte[])(e2.peek, table);
 	assert(d2.front == h2);
 
 	/** 3. Literal header field never indexed (raw)
@@ -217,7 +217,7 @@ unittest {
 	h3.neverIndex = true;
 	h3.index = false;
 	auto e3 = HeaderEncoder!HTTP2HeaderTableField(h3, table, false);
-	auto d3 = HeaderDecoder!(ubyte[])(e3.front, table);
+	auto d3 = HeaderDecoder!(ubyte[])(e3.peek, table);
 	assert(d3.front == h3);
 
 	/** 4. Indexed header field (integer)
@@ -225,7 +225,7 @@ unittest {
 	  */
 	HTTP2HeaderTableField h4 = HTTP2HeaderTableField(":method", HTTPMethod.GET);
 	auto e4 = HeaderEncoder!(HTTP2HeaderTableField)(h4, table);
-	auto d4 = HeaderDecoder!(ubyte[])(e4.front, table);
+	auto d4 = HeaderDecoder!(ubyte[])(e4.peek, table);
 	assert(d4.front == h4);
 
 	/** 5. Full request without huffman encoding

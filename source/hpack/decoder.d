@@ -8,7 +8,7 @@ import hpack.util;
 import vibe.internal.array : BatchBuffer;
 
 import std.range; // Decoder
-import std.string : representation;
+import std.string;
 
 /** Module to implement an header decoder consistent with HPACK specifications (RFC 7541)
   * The detailed description of the decoding process, examples and binary format details can
@@ -95,14 +95,14 @@ private size_t decodeInteger(I)(ref I src, ubyte bbuf) @safe @nogc
 	}
 }
 
-private string decodeLiteral(I,R)(ref I src, ref R dst) @safe
+private void decodeLiteral(I,R)(ref I src, ref R dst) @safe
 {
 	ubyte bbuf = src[0];
 	src = src[1..$];
 
 	bool huffman = (bbuf & 128) ? true : false;
 
-
+	auto adst = appender!(immutable(char)[]); // TODO a proper allocator
 	assert(!src.empty, "Cannot decode from empty range block");
 
 	// take a buffer of remaining octets
@@ -111,12 +111,9 @@ private string decodeLiteral(I,R)(ref I src, ref R dst) @safe
 	src = src[vlen..$];
 
 	if(huffman) { // huffman encoded
-		BatchBuffer!(immutable(char), 0) adst;
-		adst.putN(vlen);
 		decodeHuffman(buf, adst);
-		dst = cast(string)adst.peekDst;
+		dst = adst.data;
 	} else { // raw encoded
-		dst = buf;
+		dst = cast(string)buf;
 	}
 }
-

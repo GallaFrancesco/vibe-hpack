@@ -79,7 +79,7 @@ private void decodeSymbol(O)(ref O decoded, ref char state, int pos, ref char eo
 	assert(entry.next != state, "Invalid symbol");
 
 	if (entry.emit) { // if the symbol is terminal
-		char sym = entry.symbol;
+		auto sym = cast(immutable(char))entry.symbol;
 		decoded.put(sym);
 	}
 
@@ -105,7 +105,6 @@ unittest {
 	import vibe.internal.array : BatchBuffer;
 
 	immutable ubyte[12] src = [0xf1, 0xe3, 0xc2, 0xe5, 0xf2, 0x3a, 0x6b, 0xa0, 0xab, 0x90, 0xf4, 0xff];
-	//BatchBuffer!char bres;
 	BatchBuffer!(char, 15) bres;
 	bres.putN(15);
 	decodeHuffman(src, bres);

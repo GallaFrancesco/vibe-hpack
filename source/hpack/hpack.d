@@ -10,8 +10,8 @@ import std.typecons;
 import std.array; // appender
 import std.algorithm.iteration;
 
-void encodeHPACK(I,R)(I src, ref R dst, ref IndexingTable table, bool huffman = true)
-@safe
+void encodeHPACK(I,R)(I src, ref R dst, ref IndexingTable table, bool huffman = true) @safe
+	if(is(I == HTTP2HeaderTableField) || is(ElementType!I : HTTP2HeaderTableField))
 {
 	static if(is(I == HTTP2HeaderTableField)) {
 		src.encode(dst, table, huffman);
@@ -87,7 +87,6 @@ unittest {
       * :authority: www.example.com
       * cache-control: no-cache
 	  */
-	import vibe.internal.array : BatchBuffer;
 	HTTP2HeaderTableField[] block = [
 		HTTP2HeaderTableField(":method", HTTPMethod.GET),
 		HTTP2HeaderTableField(":scheme", "http"),
@@ -113,3 +112,4 @@ unittest {
 	block.encodeHPACK(bbres, table, true);
 	assert(bbres.data == eexpected);
 }
+

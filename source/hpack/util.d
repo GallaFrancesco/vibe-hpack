@@ -1,7 +1,6 @@
 module hpack.util;
 
 import std.range;
-import std.traits;
 
 // decode ubyte as integer representation according to prefix
 size_t toInteger(ubyte bbuf, uint prefix) @safe @nogc

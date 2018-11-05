@@ -19,7 +19,6 @@ matrix:
     - d: dmd
       env: CONFIG='select' DUB_FLAGS='--build unittest-cov
 
-
 before_install:
   # Use the dub-updating fork of the installer script until https://github.com/dlang/installer/pull/301 is merged
   - wget https://raw.githubusercontent.com/wilzbach/installer-dub/master/script/install.sh -O ~/dlang/install.dub.sh

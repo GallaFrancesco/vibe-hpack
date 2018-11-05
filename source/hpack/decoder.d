@@ -102,7 +102,6 @@ private void decodeLiteral(I,R)(ref I src, ref R dst) @safe
 
 	bool huffman = (bbuf & 128) ? true : false;
 
-	auto adst = appender!(immutable(char)[]); // TODO a proper allocator
 	assert(!src.empty, "Cannot decode from empty range block");
 
 	// take a buffer of remaining octets
@@ -111,6 +110,8 @@ private void decodeLiteral(I,R)(ref I src, ref R dst) @safe
 	src = src[vlen..$];
 
 	if(huffman) { // huffman encoded
+		auto adst = appender!string; // TODO a proper allocator
+		adst.reserve(vlen*2); // max compression ratio is < 0.5
 		decodeHuffman(buf, adst);
 		dst = adst.data;
 	} else { // raw encoded

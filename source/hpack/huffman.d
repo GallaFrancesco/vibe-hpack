@@ -68,7 +68,7 @@ void decodeHuffman(I, O)(I source, ref O dst) @safe
 		decodeSymbol(dst, state, ch & 0xf, eos);
 	}
 
-	assert(eos, "Invalid dst string");
+	assert(eos, "Invalid encoded source");
 }
 
 private void decodeSymbol(O)(ref O decoded, ref char state, int pos, ref char eos)

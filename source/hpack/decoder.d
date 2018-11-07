@@ -5,10 +5,12 @@ import hpack.huffman;
 import hpack.tables;
 import hpack.util;
 
-import vibe.internal.array : BatchBuffer;
+import vibe.internal.array : AllocAppender;
 
 import std.range; // Decoder
 import std.string;
+import std.experimental.allocator;
+import std.experimental.allocator.mallocator;
 
 /** Module to implement an header decoder consistent with HPACK specifications (RFC 7541)
   * The detailed description of the decoding process, examples and binary format details can
@@ -19,7 +21,7 @@ import std.string;
 */
 alias HTTP2SettingValue = uint;
 
-void decode(I, R)(ref I src, ref R dst, ref IndexingTable table) @safe
+void decode(I, R, T)(ref I src, ref R dst, ref IndexingTable table,  ref T alloc) @safe
 {
 	ubyte bbuf = src[0];
 	src = src[1..$];
@@ -36,9 +38,9 @@ void decode(I, R)(ref I src, ref R dst, ref IndexingTable table) @safe
 			if(idx > 0) {  // name == table[index].name, value == literal
 				hres.name = table[idx].name;
 			} else {   // name == literal, value == literal
-				decodeLiteral(src, hres.name);
+				decodeLiteral(src, hres.name, alloc);
 			}
-			decodeLiteral(src, hres.value);
+			decodeLiteral(src, hres.value, alloc);
 			hres.index = true;
 			hres.neverIndex = false;
 
@@ -47,9 +49,9 @@ void decode(I, R)(ref I src, ref R dst, ref IndexingTable table) @safe
 			if(idx > 0) {  // name == table[index].name, value == literal
 				hres.name = table[idx].name;
 			} else {   // name == literal, value == literal
-				decodeLiteral(src, hres.name);
+				decodeLiteral(src, hres.name, alloc);
 			}
-			decodeLiteral(src, hres.value);
+			decodeLiteral(src, hres.value, alloc);
 			hres.index = false;
 			hres.neverIndex = true;
 
@@ -58,9 +60,9 @@ void decode(I, R)(ref I src, ref R dst, ref IndexingTable table) @safe
 			if(idx > 0) {  // name == table[index].name, value == literal
 				hres.name = table[idx].name;
 			} else {   // name == literal, value == literal
-				decodeLiteral(src, hres.name);
+				decodeLiteral(src, hres.name, alloc);
 			}
-			decodeLiteral(src, hres.value);
+			decodeLiteral(src, hres.value, alloc);
 			hres.index = hres.neverIndex = false;
 
 		} else { // dynamic table size update (bbuf[2] is set)
@@ -95,7 +97,7 @@ private size_t decodeInteger(I)(ref I src, ubyte bbuf) @safe @nogc
 	}
 }
 
-private void decodeLiteral(I,R)(ref I src, ref R dst) @safe
+private void decodeLiteral(I,R,T)(ref I src, ref R dst, ref T alloc) @safe
 {
 	ubyte bbuf = src[0];
 	src = src[1..$];
@@ -110,10 +112,11 @@ private void decodeLiteral(I,R)(ref I src, ref R dst) @safe
 	src = src[vlen..$];
 
 	if(huffman) { // huffman encoded
-		auto adst = appender!string; // TODO a proper allocator
-		adst.reserve(vlen*2); // max compression ratio is < 0.5
-		decodeHuffman(buf, adst);
-		dst = adst.data;
+		() @trusted {
+			auto adst = AllocAppender!string(alloc);
+			decodeHuffman(buf, adst);
+			dst = adst.data;
+		}();
 	} else { // raw encoded
 		dst = cast(string)buf;
 	}

@@ -21,7 +21,7 @@ import std.experimental.allocator.mallocator;
 */
 alias HTTP2SettingValue = uint;
 
-void decode(I, R, T)(ref I src, ref R dst, ref IndexingTable table,  ref T alloc) @safe
+void decode(I, R, T)(ref I src, ref R dst, ref IndexingTable table,  ref T alloc) @trusted
 {
 	ubyte bbuf = src[0];
 	src = src[1..$];
@@ -32,15 +32,18 @@ void decode(I, R, T)(ref I src, ref R dst, ref IndexingTable table,  ref T alloc
 	} else {
 		HTTP2HeaderTableField hres;
 		bool update = false;
+		auto adst = AllocAppender!string(alloc);
 
 		if (bbuf & 64) { // inserted in dynamic table
 			auto idx = bbuf.toInteger(2);
 			if(idx > 0) {  // name == table[index].name, value == literal
 				hres.name = table[idx].name;
 			} else {   // name == literal, value == literal
-				decodeLiteral(src, hres.name, alloc);
+				decodeLiteral(src, adst);
+				hres.name.setReset(adst);
 			}
-			decodeLiteral(src, hres.value, alloc);
+			decodeLiteral(src, adst);
+			hres.value.setReset(adst);
 			hres.index = true;
 			hres.neverIndex = false;
 
@@ -49,9 +52,11 @@ void decode(I, R, T)(ref I src, ref R dst, ref IndexingTable table,  ref T alloc
 			if(idx > 0) {  // name == table[index].name, value == literal
 				hres.name = table[idx].name;
 			} else {   // name == literal, value == literal
-				decodeLiteral(src, hres.name, alloc);
+				decodeLiteral(src, adst);
+				hres.name.setReset(adst);
 			}
-			decodeLiteral(src, hres.value, alloc);
+			decodeLiteral(src, adst);
+			hres.value.setReset(adst);
 			hres.index = false;
 			hres.neverIndex = true;
 
@@ -60,9 +65,11 @@ void decode(I, R, T)(ref I src, ref R dst, ref IndexingTable table,  ref T alloc
 			if(idx > 0) {  // name == table[index].name, value == literal
 				hres.name = table[idx].name;
 			} else {   // name == literal, value == literal
-				decodeLiteral(src, hres.name, alloc);
+				decodeLiteral(src, adst);
+				hres.name.setReset(adst);
 			}
-			decodeLiteral(src, hres.value, alloc);
+			decodeLiteral(src, adst);
+			hres.value.setReset(adst);
 			hres.index = hres.neverIndex = false;
 
 		} else { // dynamic table size update (bbuf[2] is set)
@@ -74,6 +81,13 @@ void decode(I, R, T)(ref I src, ref R dst, ref IndexingTable table,  ref T alloc
 
 		if(!update) dst.put(hres);
 	}
+}
+
+private void setReset(I,R)(ref I dst, ref R buf)
+	if(is(R == AllocAppender!string) || is(R == AllocAppender!(immutable(ubyte)[])))
+{
+	dst = buf.data;
+	buf.reset;
 }
 
 private size_t decodeInteger(I)(ref I src, ubyte bbuf) @safe @nogc
@@ -97,7 +111,7 @@ private size_t decodeInteger(I)(ref I src, ubyte bbuf) @safe @nogc
 	}
 }
 
-private void decodeLiteral(I,R,T)(ref I src, ref R dst, ref T alloc) @safe
+private void decodeLiteral(I,R)(ref I src, ref R dst) @safe
 {
 	ubyte bbuf = src[0];
 	src = src[1..$];
@@ -112,12 +126,8 @@ private void decodeLiteral(I,R,T)(ref I src, ref R dst, ref T alloc) @safe
 	src = src[vlen..$];
 
 	if(huffman) { // huffman encoded
-		() @trusted {
-			auto adst = AllocAppender!string(alloc);
-			decodeHuffman(buf, adst);
-			dst = adst.data;
-		}();
+		decodeHuffman(buf, dst);
 	} else { // raw encoded
-		dst = cast(string)buf;
+		dst.put(cast(string)buf);
 	}
 }

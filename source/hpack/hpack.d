@@ -49,7 +49,6 @@ unittest {
 
 	h1.encodeHPACK(e1, table, false);
 	decodeHPACK(cast(immutable(ubyte)[])e1.data, dec1, table, alloc);
-	import std.stdio;
 	assert(dec1.data.front == h1);
 
 	/** 1bis. Literal header field w. indexing (huffman encoded)

@@ -5,10 +5,12 @@ import hpack.huffman;
 import hpack.tables;
 import hpack.util;
 
+import vibe.internal.array : AllocAppender;
+
 import std.range; // Decoder
-import std.string : representation;
-import std.array;
-import std.typecons : tuple;
+import std.string;
+import std.experimental.allocator;
+import std.experimental.allocator.mallocator;
 
 /** Module to implement an header decoder consistent with HPACK specifications (RFC 7541)
   * The detailed description of the decoding process, examples and binary format details can
@@ -19,239 +21,113 @@ import std.typecons : tuple;
 */
 alias HTTP2SettingValue = uint;
 
-/** implements an input range to decode an header block
-  * m_table is a reference to the original table
-  */
-struct HeaderDecoder(T = ubyte[])
-		if (isInputRange!T && (is(ElementType!T : char) || (is(ElementType!T : ubyte))))
+void decode(I, R, T)(ref I src, ref R dst, ref IndexingTable table,  ref T alloc) @trusted
 {
-	private {
-		immutable(ubyte)[] m_range;
-		IndexingTable m_table; // only for retrieving data
-		HTTP2HeaderTableField m_decoded;
-	}
+	ubyte bbuf = src[0];
+	src = src[1..$];
 
-	this(T range, IndexingTable table) @trusted
-	{
-		static if(is(typeof(representation(range)) == immutable(ubyte)[])) m_range = range;
-		else m_range = cast(immutable(ubyte)[])range;
+	if(bbuf & 128) {
+		auto res = decodeInteger(src, bbuf);
+		dst.put(table[res]);
+	} else {
+		HTTP2HeaderTableField hres;
+		bool update = false;
+		auto adst = AllocAppender!string(alloc);
 
-		m_table = table;
-
-		decode();
-	}
-
-// InputRange specific methods
-	@property bool empty() @safe @nogc { return m_range.empty; }
-
-	@property auto front() @safe @nogc { return m_decoded; }
-
-	void popFront() @safe
-	{
-		assert(!empty, "Cannot call popFront on an empty HeaderDecoder");
-
-		// advance if data is still available
-		decode();
-	}
-
-	void put(T)(T range) @trusted
-	{
-		static if(is(typeof(representation(range)) == immutable(ubyte)[])) m_range = range;
-		else m_range ~= cast(immutable(ubyte)[])range;
-
-		decode();
-	}
-
-	@property bool toIndex() @safe @nogc { return m_decoded.index; }
-
-	@property bool neverIndexed() @safe @nogc { return m_decoded.neverIndex; }
-
-// decoding
-	private {
-
-		void decode() @safe
-		{
-			ubyte bbuf = m_range[0];
-			m_range = m_range[1..$];
-
-			if(bbuf & 128) {
-				auto res = decodeInteger(bbuf);
-				m_decoded = m_table[res];
-			} else {
-				HTTP2HeaderTableField hres;
-				bool update = false;
-
-				if (bbuf & 64) { // inserted in dynamic table
-					auto idx = bbuf.toInteger(2);
-					if(idx > 0) {  // name == table[index].name, value == literal
-						hres.name = m_table[idx].name;
-					} else {   // name == literal, value == literal
-						hres.name = decodeLiteral();
-					}
-					hres.value = decodeLiteral();
-					hres.index = true;
-					hres.neverIndex = false;
-
-				} else if(bbuf & 16) { // NEVER inserted in dynamic table
-					auto idx = bbuf.toInteger(4);
-					if(idx > 0) {  // name == table[index].name, value == literal
-						hres.name = m_table[idx].name;
-					} else {   // name == literal, value == literal
-						hres.name = decodeLiteral();
-					}
-					hres.value = decodeLiteral();
-					hres.index = false;
-					hres.neverIndex = true;
-
-				} else if(!(bbuf & 32)) { // this occourrence is not inserted in dynamic table
-					auto idx = bbuf.toInteger(4);
-					if(idx > 0) {  // name == table[index].name, value == literal
-						hres.name = m_table[idx].name;
-					} else {   // name == literal, value == literal
-						hres.name = decodeLiteral();
-					}
-					hres.value = decodeLiteral();
-					hres.index = hres.neverIndex = false;
-
-				} else { // dynamic table size update (bbuf[2] is set)
-					update = true;
-					auto nsize = bbuf.toInteger(3);
-					m_table.updateSize(cast(HTTP2SettingValue)nsize);
-				}
-				assert(!(hres.index && hres.neverIndex), "Invalid header indexing information");
-
-				if(!update) m_decoded = hres;
+		if (bbuf & 64) { // inserted in dynamic table
+			auto idx = bbuf.toInteger(2);
+			if(idx > 0) {  // name == table[index].name, value == literal
+				hres.name = table[idx].name;
+			} else {   // name == literal, value == literal
+				decodeLiteral(src, adst);
+				hres.name.setReset(adst);
 			}
-		}
+			decodeLiteral(src, adst);
+			hres.value.setReset(adst);
+			hres.index = true;
+			hres.neverIndex = false;
 
-		size_t decodeInteger(ubyte bbuf) @safe @nogc
-		{
-			uint nbits = 7;
-			auto res = bbuf.toInteger(1);
-
-			if (res < (1 << nbits) - 1) {
-				return res;
-			} else {
-				uint m = 0;
-				do {
-					// take another octet
-					bbuf = m_range[0];
-					m_range = m_range[1..$];
-					// concatenate it to the result
-					res = res + bbuf.toInteger(1)*(1 << m);
-					m += 7;
-				} while(bbuf == 1);
-				return res;
+		} else if(bbuf & 16) { // NEVER inserted in dynamic table
+			auto idx = bbuf.toInteger(4);
+			if(idx > 0) {  // name == table[index].name, value == literal
+				hres.name = table[idx].name;
+			} else {   // name == literal, value == literal
+				decodeLiteral(src, adst);
+				hres.name.setReset(adst);
 			}
-		}
+			decodeLiteral(src, adst);
+			hres.value.setReset(adst);
+			hres.index = false;
+			hres.neverIndex = true;
 
-		string decodeLiteral() @safe
-		{
-			ubyte bbuf = m_range[0];
-			m_range = m_range[1..$];
-
-			auto res = appender!string; // TODO a proper allocator
-			bool huffman = (bbuf & 128) ? true : false;
-
-
-			assert(!m_range.empty, "Cannot decode from empty range block");
-
-			// take a buffer of remaining octets
-			auto vlen = bbuf.toInteger(1); // value length
-			auto buf = m_range[0..vlen];
-			m_range = m_range[vlen..$];
-
-			if(huffman) { // huffman encoded
-				decodeHuffman(buf, res);
-			} else { // raw encoded
-				res.put(buf);
+		} else if(!(bbuf & 32)) { // this occourrence is not inserted in dynamic table
+			auto idx = bbuf.toInteger(4);
+			if(idx > 0) {  // name == table[index].name, value == literal
+				hres.name = table[idx].name;
+			} else {   // name == literal, value == literal
+				decodeLiteral(src, adst);
+				hres.name.setReset(adst);
 			}
-			return res.data;
+			decodeLiteral(src, adst);
+			hres.value.setReset(adst);
+			hres.index = hres.neverIndex = false;
+
+		} else { // dynamic table size update (bbuf[2] is set)
+			update = true;
+			auto nsize = bbuf.toInteger(3);
+			table.updateSize(cast(HTTP2SettingValue)nsize);
 		}
+		assert(!(hres.index && hres.neverIndex), "Invalid header indexing information");
+
+		if(!update) dst.put(hres);
 	}
 }
 
-unittest {
-	// Following examples can be found in Appendix C of the HPACK RFC
+private void setReset(I,R)(ref I dst, ref R buf)
+	if(is(R == AllocAppender!string) || is(R == AllocAppender!(immutable(ubyte)[])))
+{
+	dst = buf.data;
+	buf.reset;
+}
 
-	IndexingTable table = IndexingTable(4096);
-	/** 1. Literal header field w. indexing (raw)
-	  * custom-key: custom-header
-	  */
-	ubyte[] block = [0x40, 0x0a, 0x63, 0x75, 0x73, 0x74, 0x6f, 0x6d, 0x2d, 0x6b, 0x65, 0x79,
-		0x0d, 0x63, 0x75, 0x73, 0x74, 0x6f, 0x6d, 0x2d, 0x68, 0x65, 0x61, 0x64, 0x65, 0x72];
+private size_t decodeInteger(I)(ref I src, ubyte bbuf) @safe @nogc
+{
+	uint nbits = 7;
+	auto res = bbuf.toInteger(1);
 
-	auto decoder = HeaderDecoder!(ubyte[])(block, table);
-	assert(decoder.front.name == "custom-key" && decoder.front.value == "custom-header");
-	// check entries to be inserted in the indexing table (dynamic)
-	assert(decoder.front.index);
-
-	/** 1bis. Literal header field w. indexing (huffman encoded)
-	  * :authority: www.example.com
-	  */
-	block = [0x41, 0x8c, 0xf1, 0xe3, 0xc2, 0xe5, 0xf2, 0x3a, 0x6b, 0xa0, 0xab, 0x90, 0xf4, 0xff];
-	decoder.put(block);
-	assert(decoder.front.name == ":authority" && decoder.front.value == "www.example.com");
-	assert(decoder.front.index);
-
-	/** 2. Literal header field without indexing (raw)
-	  * :path: /sample/path
-	  */
-	block = [0x04, 0x0c, 0x2f, 0x73, 0x61, 0x6d, 0x70, 0x6c, 0x65, 0x2f, 0x70, 0x61, 0x74, 0x68];
-	decoder.put(block);
-	assert(decoder.front.name == ":path" && decoder.front.value == "/sample/path");
-
-
-	/** 3. Literal header field never indexed (raw)
-	  * password: secret
-	  */
-	block = [0x10, 0x08, 0x70, 0x61, 0x73, 0x73, 0x77, 0x6f, 0x72, 0x64, 0x06, 0x73, 0x65,
-		  0x63, 0x72, 0x65, 0x74];
-	decoder.put(block);
-	assert(decoder.front.name == "password" && decoder.front.value == "secret");
-	assert(decoder.front.neverIndex);
-
-
-	/** 4. Indexed header field (integer)
-	  * :method: GET
-	  */
-	import vibe.http.common;
-	block = [0x82];
-	decoder.put(block);
-	assert(decoder.front.name == ":method" && decoder.front.value == HTTPMethod.GET);
-
-	/** 5. Full request without huffman encoding
-	  * :method: GET
-      * :scheme: http
-      * :path: /
-      * :authority: www.example.com
-      * cache-control: no-cache
-	  */
-	block = [0x82, 0x86, 0x84, 0xbe, 0x58, 0x08, 0x6e, 0x6f, 0x2d, 0x63, 0x61, 0x63, 0x68, 0x65];
-	table.insert(HTTP2HeaderTableField(":authority", "www.example.com"));
-	auto rdec = HeaderDecoder!(ubyte[])(block, table);
-	HTTP2HeaderTableField[] expected = [
-		HTTP2HeaderTableField(":method", HTTPMethod.GET),
-		HTTP2HeaderTableField(":scheme", "http"),
-		HTTP2HeaderTableField(":path", "/"),
-		HTTP2HeaderTableField(":authority", "www.example.com"),
-		HTTP2HeaderTableField("cache-control", "no-cache")];
-
-	foreach(i,h; rdec.enumerate(0)) {
-		assert(h == expected[i]);
+	if (res < (1 << nbits) - 1) {
+		return res;
+	} else {
+		uint m = 0;
+		do {
+			// take another octet
+			bbuf = src[0];
+			src = src[1..$];
+			// concatenate it to the result
+			res = res + bbuf.toInteger(1)*(1 << m);
+			m += 7;
+		} while(bbuf == 1);
+		return res;
 	}
+}
 
-	/** 5. Full request with huffman encoding
-	  * :method: GET
-      * :scheme: http
-      * :path: /
-      * :authority: www.example.com
-      * cache-control: no-cache
-	  */
-	block = [0x82, 0x86, 0x84, 0xbe, 0x58, 0x86, 0xa8, 0xeb, 0x10, 0x64, 0x9c,0xbf];
-	auto hdec = HeaderDecoder!(ubyte[])(block, table);
+private void decodeLiteral(I,R)(ref I src, ref R dst) @safe
+{
+	ubyte bbuf = src[0];
+	src = src[1..$];
 
-	foreach(i,h; hdec.enumerate(0)) {
-		assert(h == expected[i]);
+	bool huffman = (bbuf & 128) ? true : false;
+
+	assert(!src.empty, "Cannot decode from empty range block");
+
+	// take a buffer of remaining octets
+	auto vlen = bbuf.toInteger(1); // value length
+	auto buf = src[0..vlen];
+	src = src[vlen..$];
+
+	if(huffman) { // huffman encoded
+		decodeHuffman(buf, dst);
+	} else { // raw encoded
+		dst.put(cast(string)buf);
 	}
 }

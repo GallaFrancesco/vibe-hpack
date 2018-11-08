@@ -4,6 +4,7 @@ import hpack.tables;
 import hpack.huffman;
 import hpack.util;
 
+import std.range;
 import std.typecons;
 import std.conv;
 import std.array;
@@ -18,7 +19,7 @@ void encode(R)(HTTP2HeaderTableField header, ref R dst, ref IndexingTable table,
 }
 
 /// encode a pure integer (present in table) or integer name + literal value
-private bool encodeInteger(R)(const HTTP2HeaderTableField header, ref R dst, ref IndexingTable table, bool huffman)
+private bool encodeInteger(R)(const HTTP2HeaderTableField header, ref R dst, ref IndexingTable table, bool huffman = true)
 @safe
 {
 	// check table for indexed headers
@@ -70,7 +71,7 @@ private bool encodeInteger(R)(const HTTP2HeaderTableField header, ref R dst, ref
 }
 
 /// encode a literal field depending on its indexing requirements
-private void encodeLiteral(R)(const HTTP2HeaderTableField header, ref R dst, bool huffman)
+private void encodeLiteral(R)(const HTTP2HeaderTableField header, ref R dst, bool huffman = true)
 @safe
 {
 	if(header.index) dst.put(cast(ubyte)(64));
@@ -82,7 +83,7 @@ private void encodeLiteral(R)(const HTTP2HeaderTableField header, ref R dst, boo
 }
 
 /// encode a field (name / value) using huffman or raw encoding
-private void encodeLiteralField(R)(string src, ref R dst, bool huffman) @safe
+private void encodeLiteralField(R)(string src, ref R dst, bool huffman = true) @safe
 {
 	if(huffman) {
 		encodeHuffman(src, dst);
@@ -91,4 +92,35 @@ private void encodeLiteralField(R)(string src, ref R dst, bool huffman) @safe
 		dst.put(cast(ubyte)blen);
 		dst.put(cast(ubyte[])(to!string(src).dup));
 	}
+}
+
+unittest {
+	// encode integer
+	import vibe.internal.array : BatchBuffer;
+	import vibe.http.common;
+	IndexingTable table = IndexingTable(4096);
+
+	BatchBuffer!(ubyte, 1) bres;
+	bres.putN(1);
+	ubyte[1] expected = [0x82];
+	auto hint = HTTP2HeaderTableField(":method", HTTPMethod.GET);
+
+	assert(encodeInteger(hint, bres, table));
+	assert(bres.peekDst == expected);
+}
+
+unittest {
+	// encode literal
+	// custom-key: custom-header
+	import vibe.internal.array : BatchBuffer;
+	ubyte[26] lexpected = [0x40, 0x0a, 0x63, 0x75,  0x73, 0x74,  0x6f, 0x6d,  0x2d, 0x6b,
+		0x65, 0x79, 0x0d, 0x63, 0x75, 0x73, 0x74, 0x6f, 0x6d, 0x2d, 0x68, 0x65, 0x61, 0x64,
+		0x65, 0x72];
+
+	BatchBuffer!(ubyte, 26) lres;
+	lres.putN(26);
+	auto hlit = HTTP2HeaderTableField("custom-key", "custom-header");
+
+	encodeLiteral(hlit, lres, false);
+	assert(lres.peekDst == lexpected);
 }
